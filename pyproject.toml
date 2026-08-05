@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28,<1", "pytest>=8.4,<9", "pytest-asyncio>=1.0,<2", "ruff>=0.12,<1"]
+dev = ["httpx>=0.28,<1", "pytest>=8.4,<9", "pytest-asyncio>=1.0,<2", "pyyaml>=6.0,<7", "ruff>=0.12,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["apps/api/src/sentinel"]

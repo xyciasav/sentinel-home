@@ -1,6 +1,6 @@
 # Deployment
 
-Copy `.env.example` to `.env`, replace all `change-me` values, and deploy `compose.yml`. Portainer Git stacks can reference the repository and Compose path directly; environment values belong in Portainer, not source control.
+Copy `.env.example` to `.env`, replace all `change-me` values, and deploy `docker-compose.yml`. Portainer Git stacks discover that conventional filename automatically. `compose.yml` is also retained for Docker Compose users who select it explicitly. Environment values belong in Portainer, not source control.
 
 The API binds to `127.0.0.1` by default. Set `BIND_ADDRESS` to a specific trusted LAN address only when intended. PostgreSQL and Redis publish no host ports. Liveness confirms the process; readiness checks dependencies and returns HTTP 503 when unavailable.
 

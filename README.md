@@ -14,7 +14,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 ## Quick start
 
 1. Copy `.env.example` to `.env` and replace every value marked `change-me`.
-2. Run `docker compose up --build`.
+2. Run `docker compose up --build`. Docker and Portainer discover `docker-compose.yml` automatically.
 3. Open `http://127.0.0.1:8080/api/v1/health/ready`.
 
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
