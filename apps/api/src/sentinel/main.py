@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Response, status
+from fastapi.responses import RedirectResponse
 
 from sentinel.config import get_settings
 from sentinel.health import database_status, redis_status
@@ -15,6 +16,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.get("/api/v1/health/live", tags=["health"])

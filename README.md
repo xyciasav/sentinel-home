@@ -21,6 +21,8 @@ For Portainer, set `POSTGRES_PASSWORD`, `SESSION_SECRET`, and `DATA_ENCRYPTION_K
 
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
 
+Opening the server's root URL redirects to the interactive API documentation at `/docs`. A full dashboard is scheduled for Phase 2 and is not part of this foundation release.
+
 ## Local development
 
 Requires Python 3.12 or newer.

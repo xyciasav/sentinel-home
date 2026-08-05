@@ -2,6 +2,13 @@ from fastapi.testclient import TestClient
 from sentinel.main import app
 
 
+def test_root_redirects_to_api_documentation() -> None:
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/")
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"
+
+
 def test_liveness_is_public_and_minimal() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/health/live")
