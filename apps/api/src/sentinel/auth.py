@@ -46,6 +46,10 @@ class AuthenticationResult(BaseModel):
     expires_at: datetime
 
 
+class CsrfResult(BaseModel):
+    csrf_token: str
+
+
 def client_address(request: Request) -> str | None:
     return request.client.host if request.client else None
 
@@ -167,6 +171,18 @@ async def current_user(
 ) -> AuthenticatedUser:
     user, _ = authenticated
     return AuthenticatedUser(id=user.id, username=user.username, is_admin=user.is_admin)
+
+
+@router.get("/csrf", response_model=CsrfResult)
+async def refresh_csrf_token(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    authenticated: Annotated[tuple[User, LoginSession], Depends(authenticated_session)],
+) -> CsrfResult:
+    _, login_session = authenticated
+    csrf_token = create_secret()
+    login_session.csrf_hash = hash_secret(csrf_token)
+    await database.commit()
+    return CsrfResult(csrf_token=csrf_token)
 
 
 @router.post("/logout", status_code=204)

@@ -14,6 +14,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Database-backed setup status at `/api/v1/setup/status`
 - One-time administrator bootstrap and Argon2id authentication
 - Hashed server-side sessions, CSRF-protected logout, and authentication audit events
+- Responsive first-run, login, and overview web interface
 
 ## Quick start
 
@@ -25,7 +26,7 @@ For Portainer, set `POSTGRES_PASSWORD`, `SESSION_SECRET`, and `DATA_ENCRYPTION_K
 
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
 
-Opening the server's root URL redirects to the interactive API documentation at `/docs`. A full dashboard is scheduled for Phase 2 and is not part of this foundation release.
+Opening the server's root URL loads the Sentinel web interface. Interactive API documentation remains available at `/docs`.
 
 ## Initialize the administrator
 

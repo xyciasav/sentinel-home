@@ -1,3 +1,11 @@
+FROM node:22-alpine AS web-build
+
+WORKDIR /web
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci
+COPY apps/web ./
+RUN npm run build
+
 FROM python:3.13-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
@@ -7,6 +15,7 @@ COPY pyproject.toml README.md ./
 COPY apps/api/src ./apps/api/src
 COPY alembic.ini ./
 COPY database/migrations ./database/migrations
+COPY --from=web-build /web/dist /app/web
 RUN pip install --no-cache-dir .
 RUN addgroup --system --gid 10001 sentinel && adduser --system --uid 10001 --ingroup sentinel --home /nonexistent --no-create-home sentinel
 USER 10001:10001
