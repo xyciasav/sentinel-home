@@ -8,14 +8,20 @@ export type Device = {
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const { headers, ...requestOptions } = options;
   const response = await fetch(path, {
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options
+    ...requestOptions,
+    headers: { "Content-Type": "application/json", ...(headers as Record<string, string> | undefined) }
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(body.detail ?? `Request failed (${response.status})`);
+    const detail = body.detail;
+    if (Array.isArray(detail)) {
+      const message = detail.map(item => `${item.loc?.slice(1).join(".") || "request"}: ${item.msg}`).join("; ");
+      throw new Error(message);
+    }
+    throw new Error(typeof detail === "string" ? detail : `Request failed (${response.status})`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
