@@ -8,7 +8,7 @@ def test_portainer_compose_file_exists_and_matches_compose_alias() -> None:
     portainer_stack = yaml.safe_load((root / "docker-compose.yml").read_text())
     compose_alias = yaml.safe_load((root / "compose.yml").read_text())
     assert portainer_stack == compose_alias
-    assert set(portainer_stack["services"]) == {"api", "postgres", "redis"}
+    assert set(portainer_stack["services"]) == {"api", "migrate", "postgres", "redis"}
 
 
 def test_compose_requires_secrets_and_derives_internal_urls() -> None:
@@ -25,3 +25,11 @@ def test_api_image_is_rebuilt_on_git_stack_update() -> None:
     compose = yaml.safe_load((root / "docker-compose.yml").read_text())
     assert compose["services"]["api"]["pull_policy"] == "build"
     assert compose["services"]["api"]["image"].startswith("sentinel-home-api:")
+
+
+def test_api_waits_for_successful_migration() -> None:
+    root = Path(__file__).parents[1]
+    compose = yaml.safe_load((root / "docker-compose.yml").read_text())
+    assert compose["services"]["migrate"]["command"] == ["alembic", "upgrade", "head"]
+    dependency = compose["services"]["api"]["depends_on"]["migrate"]
+    assert dependency["condition"] == "service_completed_successfully"

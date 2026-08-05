@@ -5,6 +5,8 @@ RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --upgra
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY apps/api/src ./apps/api/src
+COPY alembic.ini ./
+COPY database/migrations ./database/migrations
 RUN pip install --no-cache-dir .
 RUN addgroup --system --gid 10001 sentinel && adduser --system --uid 10001 --ingroup sentinel --home /nonexistent --no-create-home sentinel
 USER 10001:10001

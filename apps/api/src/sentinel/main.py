@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 
 from sentinel.config import get_settings
 from sentinel.health import database_status, redis_status
+from sentinel.setup import router as setup_router
 
 
 @asynccontextmanager
@@ -16,6 +17,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
+app.include_router(setup_router)
 
 
 @app.get("/", include_in_schema=False)

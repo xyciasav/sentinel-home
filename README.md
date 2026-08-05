@@ -10,6 +10,8 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Phase 1 architecture, threat model, data model, API, and agent protocol documents
 - Production-oriented and development Docker Compose stacks
 - Unit tests for health behavior and configuration safety
+- Versioned PostgreSQL migrations and the initial identity/device inventory schema
+- Database-backed setup status at `/api/v1/setup/status`
 
 ## Quick start
 

@@ -2,14 +2,14 @@ name: sentinel-home
 
 services:
   api:
-    image: sentinel-home-api:${SENTINEL_VERSION:-0.1.1}
+    image: sentinel-home-api:${SENTINEL_VERSION:-0.2.0}
     pull_policy: build
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
       SENTINEL_ENVIRONMENT: production
-      SENTINEL_VERSION: ${SENTINEL_VERSION:-0.1.1}
+      SENTINEL_VERSION: ${SENTINEL_VERSION:-0.2.0}
       DATABASE_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Portainer}@postgres:5432/${POSTGRES_DB:-sentinel}
       REDIS_URL: redis://redis:6379/0
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in Portainer}
@@ -18,7 +18,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8080}:8080"]
     depends_on:
-      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health/live', timeout=2)"]
@@ -35,6 +35,29 @@ services:
     logging: &logging
       driver: json-file
       options: {max-size: 10m, max-file: "3"}
+
+  migrate:
+    image: sentinel-home-api:${SENTINEL_VERSION:-0.2.0}
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      SENTINEL_ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Portainer}@postgres:5432/${POSTGRES_DB:-sentinel}
+      REDIS_URL: redis://redis:6379/0
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in Portainer}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY in Portainer}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [database]
+    logging: *logging
 
   postgres:
     image: postgres:17-alpine
