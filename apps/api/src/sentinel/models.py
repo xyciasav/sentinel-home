@@ -66,6 +66,11 @@ class Device(Base):
     device_type: Mapped[str | None] = mapped_column(String(50))
     criticality: Mapped[str] = mapped_column(String(20), default="normal")
     notes: Mapped[str | None] = mapped_column(Text)
+    monitor_port: Mapped[int | None]
+    status: Mapped[str] = mapped_column(String(20), default="unknown")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_latency_ms: Mapped[int | None]
+    last_failure_reason: Mapped[str | None] = mapped_column(String(100))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     addresses: Mapped[list["DeviceAddress"]] = relationship(cascade="all, delete-orphan")

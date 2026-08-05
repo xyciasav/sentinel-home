@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -9,18 +9,28 @@ from fastapi.staticfiles import StaticFiles
 
 from sentinel.auth import router as auth_router
 from sentinel.config import get_settings
+from sentinel.devices import router as devices_router
 from sentinel.health import database_status, redis_status
+from sentinel.monitoring import monitoring_loop
 from sentinel.setup import router as setup_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_settings()
+    monitor_task = None
+    if get_settings().database_url:
+        monitor_task = asyncio.create_task(monitoring_loop())
     yield
+    if monitor_task:
+        monitor_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor_task
 
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(devices_router)
 app.include_router(setup_router)
 web_root = Path("/app/web")
 if web_root.is_dir():

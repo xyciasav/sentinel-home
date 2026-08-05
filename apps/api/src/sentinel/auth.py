@@ -123,6 +123,16 @@ async def authenticated_session(
     return authenticated
 
 
+async def csrf_protected_session(
+    authenticated: Annotated[tuple[User, LoginSession], Depends(authenticated_session)],
+    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> tuple[User, LoginSession]:
+    _, login_session = authenticated
+    if not csrf_token or not hmac.compare_digest(login_session.csrf_hash, hash_secret(csrf_token)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid CSRF token")
+    return authenticated
+
+
 @router.post("/bootstrap", response_model=AuthenticationResult, status_code=201)
 async def bootstrap_administrator(
     credentials: Credentials,
@@ -189,12 +199,9 @@ async def refresh_csrf_token(
 async def logout(
     response: Response,
     database: Annotated[AsyncSession, Depends(get_session)],
-    authenticated: Annotated[tuple[User, LoginSession], Depends(authenticated_session)],
-    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+    authenticated: Annotated[tuple[User, LoginSession], Depends(csrf_protected_session)],
 ) -> None:
     user, login_session = authenticated
-    if not csrf_token or not hmac.compare_digest(login_session.csrf_hash, hash_secret(csrf_token)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid CSRF token")
     await database.execute(delete(LoginSession).where(LoginSession.id == login_session.id))
     database.add(
         AuditEvent(

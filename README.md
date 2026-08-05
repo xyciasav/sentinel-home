@@ -15,6 +15,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - One-time administrator bootstrap and Argon2id authentication
 - Hashed server-side sessions, CSRF-protected logout, and authentication audit events
 - Responsive first-run, login, and overview web interface
+- Authenticated device inventory with safe private-network TCP monitoring every 30 seconds
 
 ## Quick start
 

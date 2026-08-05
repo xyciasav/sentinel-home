@@ -1,5 +1,11 @@
 export type User = { id: string; username: string; is_admin: boolean };
 export type AuthResult = { user: User; csrf_token: string; expires_at: string };
+export type Device = {
+  id: string; display_name: string; address: string; hostname: string | null;
+  device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
+  status: string; last_checked_at: string | null; last_latency_ms: number | null;
+  last_failure_reason: string | null;
+};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -34,6 +40,11 @@ export const api = {
       method: "POST",
       headers: { "X-CSRF-Token": csrfToken }
     }),
+  devices: () => request<Device[]>("/api/v1/devices"),
+  createDevice: (payload: Record<string, unknown>, csrfToken: string) =>
+    request<Device>("/api/v1/devices", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(payload) }),
+  checkDevice: (id: string, csrfToken: string) =>
+    request<Device>(`/api/v1/devices/${id}/check`, { method: "POST", headers: { "X-CSRF-Token": csrfToken } }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

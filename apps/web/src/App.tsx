@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, User } from "./api";
+import { api, Device, User } from "./api";
+import { DevicesPage } from "./DevicesPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -9,8 +10,15 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
+  const [page, setPage] = useState<"overview" | "devices">("overview");
+  const [devices, setDevices] = useState<Device[]>([]);
 
   useEffect(() => { void initialize(); }, []);
+  useEffect(() => {
+    if (view !== "dashboard") return;
+    const timer = window.setInterval(() => { void loadDevices(); }, 10000);
+    return () => window.clearInterval(timer);
+  }, [view]);
 
   async function initialize() {
     try {
@@ -19,7 +27,7 @@ export function App() {
       try {
         const currentUser = await api.me();
         const token = await api.csrf();
-        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus();
+        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices();
       } catch { setView("login"); }
     } catch { setView("login"); }
   }
@@ -29,8 +37,10 @@ export function App() {
     setHealth(ready.status); setVersion(release.version);
   }
 
+  async function loadDevices() { setDevices(await api.devices()); }
+
   function authenticated(result: { user: User; csrf_token: string }) {
-    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus();
+    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices();
   }
 
   if (view === "loading") return <div className="center-screen"><div className="loader" /><p>Starting Sentinel…</p></div>;
@@ -40,14 +50,14 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className="active">Overview</button>{["Devices","Services","Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button>{["Services","Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
       <div className="sidebar-bottom"><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>
+    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
-        <StatusCard label="Devices" value="0" detail="No devices enrolled yet" />
+        <StatusCard label="Devices" value={String(devices.length)} detail={devices.length ? `${devices.filter(device=>device.status==="online").length} currently online` : "No devices enrolled yet"} />
         <StatusCard label="Active incidents" value="0" detail="Nothing needs attention" />
         <StatusCard label="Version" value={version} detail="Phase 2 foundation" />
       </section>
@@ -55,7 +65,7 @@ export function App() {
         <article className="panel getting-started"><div className="panel-title"><div><p className="eyebrow">GETTING STARTED</p><h2>Build your home inventory</h2></div><span>1 of 4</span></div><Step done title="Deploy Sentinel Home" text="Core services are healthy and persistent."/><Step active title="Add your first device" text="Manual device management is the next active increment."/><Step title="Install an endpoint agent" text="Linux and Windows agent enrollment follows inventory."/><Step title="Create a service monitor" text="Track HTTP, TCP, DNS, and TLS availability."/></article>
         <article className="panel posture"><p className="eyebrow">SECURITY POSTURE</p><h2>Protected by default</h2><ul><li><b>Administrator</b><span>Configured</span></li><li><b>Session security</b><span>Active</span></li><li><b>Network exposure</b><span>LAN only</span></li><li><b>Automated remediation</b><span>Disabled</span></li></ul><p className="quiet">No changes will be made to remote systems without explicit future opt-in.</p></article>
       </section>
-    </main>
+    </>}</main>
   </div>;
 }
 
