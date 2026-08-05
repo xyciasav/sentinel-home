@@ -4,7 +4,7 @@ export type Device = {
   id: string; display_name: string; address: string; hostname: string | null;
   device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
-  last_failure_reason: string | null;
+  last_failure_reason: string | null; notes: string | null;
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -49,6 +49,8 @@ export const api = {
   devices: () => request<Device[]>("/api/v1/devices"),
   createDevice: (payload: Record<string, unknown>, csrfToken: string) =>
     request<Device>("/api/v1/devices", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(payload) }),
+  updateDevice: (id: string, payload: Record<string, unknown>, csrfToken: string) =>
+    request<Device>(`/api/v1/devices/${id}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(payload) }),
   checkDevice: (id: string, csrfToken: string) =>
     request<Device>(`/api/v1/devices/${id}/check`, { method: "POST", headers: { "X-CSRF-Token": csrfToken } }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),

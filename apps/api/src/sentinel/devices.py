@@ -40,6 +40,7 @@ class DeviceView(BaseModel):
     last_checked_at: datetime | None
     last_latency_ms: int | None
     last_failure_reason: str | None
+    notes: str | None
 
 
 def device_view(device: Device) -> DeviceView:
@@ -56,6 +57,7 @@ def device_view(device: Device) -> DeviceView:
         last_checked_at=device.last_checked_at,
         last_latency_ms=device.last_latency_ms,
         last_failure_reason=device.last_failure_reason,
+        notes=device.notes,
     )
 
 
@@ -119,5 +121,50 @@ async def check_device_now(
     if device is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
     await check_device(device)
+    await database.commit()
+    return device_view(device)
+
+
+@router.put("/{device_id}", response_model=DeviceView)
+async def update_device(
+    device_id: uuid.UUID,
+    payload: DeviceCreate,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    authenticated: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> DeviceView:
+    user, _ = authenticated
+    device = await database.scalar(
+        select(Device).where(Device.id == device_id).options(selectinload(Device.addresses))
+    )
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
+    duplicate = await database.scalar(
+        select(DeviceAddress).where(
+            DeviceAddress.address == payload.address,
+            DeviceAddress.device_id != device.id,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "a device already uses this address")
+    device.display_name = payload.display_name.strip()
+    device.hostname = payload.hostname
+    device.device_type = payload.device_type
+    device.criticality = payload.criticality
+    device.trust = payload.trust
+    device.monitor_port = payload.monitor_port
+    device.notes = payload.notes
+    if device.addresses:
+        device.addresses[0].address = payload.address.strip()
+    else:
+        device.addresses.append(DeviceAddress(address=payload.address.strip(), kind="host"))
+    await check_device(device)
+    database.add(
+        AuditEvent(
+            actor_user_id=user.id,
+            action="device.update",
+            target_type="device",
+            target_id=str(device.id),
+        )
+    )
     await database.commit()
     return device_view(device)
