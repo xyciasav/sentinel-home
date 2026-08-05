@@ -18,3 +18,10 @@ def test_compose_requires_secrets_and_derives_internal_urls() -> None:
     assert "${DATA_ENCRYPTION_KEY:?" in compose
     assert "REDIS_URL: redis://redis:6379/0" in compose
     assert "DATABASE_URL: postgresql://" in compose
+
+
+def test_api_image_is_rebuilt_on_git_stack_update() -> None:
+    root = Path(__file__).parents[1]
+    compose = yaml.safe_load((root / "docker-compose.yml").read_text())
+    assert compose["services"]["api"]["pull_policy"] == "build"
+    assert compose["services"]["api"]["image"].startswith("sentinel-home-api:")
