@@ -1,0 +1,1 @@
+"""Sentinel Home API package."""

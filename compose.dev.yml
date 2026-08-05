@@ -1,0 +1,8 @@
+services:
+  api:
+    environment:
+      SENTINEL_ENVIRONMENT: development
+      SESSION_SECRET: development-only-session-secret-00000000
+      DATA_ENCRYPTION_KEY: development-only-encryption-key
+    volumes: ["./apps/api/src:/app/apps/api/src:ro"]
+    command: ["uvicorn", "sentinel.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
