@@ -12,6 +12,8 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Unit tests for health behavior and configuration safety
 - Versioned PostgreSQL migrations and the initial identity/device inventory schema
 - Database-backed setup status at `/api/v1/setup/status`
+- One-time administrator bootstrap and Argon2id authentication
+- Hashed server-side sessions, CSRF-protected logout, and authentication audit events
 
 ## Quick start
 
@@ -24,6 +26,12 @@ For Portainer, set `POSTGRES_PASSWORD`, `SESSION_SECRET`, and `DATA_ENCRYPTION_K
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
 
 Opening the server's root URL redirects to the interactive API documentation at `/docs`. A full dashboard is scheduled for Phase 2 and is not part of this foundation release.
+
+## Initialize the administrator
+
+After deployment, open `/docs`, expand `POST /api/v1/auth/bootstrap`, select **Try it out**, and submit a username plus a password of at least 12 characters. Bootstrap succeeds only while no administrator exists and logs you in with an HttpOnly session cookie. Store the returned CSRF token for state-changing API requests during that session.
+
+Use `POST /api/v1/auth/login` for later sessions, `GET /api/v1/auth/me` to verify the current identity, and send the CSRF value in the `X-CSRF-Token` header when calling `POST /api/v1/auth/logout`.
 
 ## Local development
 

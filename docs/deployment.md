@@ -18,6 +18,8 @@ The API service uses Compose's `pull_policy: build`. Updating and redeploying th
 
 The one-shot `migrate` container runs `alembic upgrade head` after PostgreSQL becomes healthy. The API starts only after migrations finish successfully. A stopped migration container with exit code zero is expected and remains visible as deployment evidence.
 
+`COOKIE_SECURE` defaults to `false` so direct HTTP access on a trusted LAN can establish an administrator session. Set it to `true` whenever Sentinel is served through an HTTPS reverse proxy; browsers will then refuse to transmit the session cookie over plaintext HTTP. Sessions default to 12 hours and can be adjusted with `SESSION_HOURS` from 1 through 168.
+
 The API binds to `127.0.0.1` by default. Set `BIND_ADDRESS` to a specific trusted LAN address only when intended. PostgreSQL and Redis publish no host ports. Liveness confirms the process; readiness checks dependencies and returns HTTP 503 when unavailable.
 
 Before the first schema migration, backup consists of a PostgreSQL custom-format dump plus separately stored secrets. Redis is excluded. Tested scripts will ship with the first real migration. Reserve 2 CPU cores, 4 GB RAM, and at least 30 GB storage. Scanner phases will document separate peaks.
