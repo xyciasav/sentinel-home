@@ -3,7 +3,8 @@ from sentinel.vulnerabilities import fixed_version, osv_ecosystem, osv_severity
 
 def test_osv_ecosystem_requires_supported_distro_identity() -> None:
     assert osv_ecosystem("debian", "12.5") == "Debian:12"
-    assert osv_ecosystem("ubuntu", "24.04") == "Ubuntu"
+    assert osv_ecosystem("ubuntu", "24.04") == "Ubuntu:24.04:LTS"
+    assert osv_ecosystem("ubuntu", "25.10") == "Ubuntu:25.10"
     assert osv_ecosystem("raspbian", "12") is None
 
 

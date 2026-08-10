@@ -70,11 +70,15 @@ def cvss(cve: dict) -> tuple[str, str | None]:
 
 def osv_ecosystem(os_name: str | None, os_version: str | None) -> str | None:
     name = (os_name or "").lower()
-    major = (os_version or "").split(".", 1)[0]
+    version = (os_version or "").split(" ", 1)[0]
+    major = version.split(".", 1)[0]
     if name == "debian" and major.isdigit():
         return f"Debian:{major}"
-    if name == "ubuntu":
-        return "Ubuntu"
+    if name == "ubuntu" and len(version.split(".")) == 2:
+        year, month = version.split(".")
+        if year.isdigit() and month.isdigit():
+            lts = ":LTS" if int(year) % 2 == 0 and month == "04" else ""
+            return f"Ubuntu:{version}{lts}"
     return None
 
 
@@ -113,17 +117,16 @@ async def query_osv(
         async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
             for start in range(0, len(source_items), 1000):
                 batch = source_items[start : start + 1000]
+                queries = [
+                    {
+                        "version": version,
+                        "package": {"name": name, "ecosystem": ecosystem},
+                    }
+                    for (name, version), _package in batch
+                ]
                 response = await client.post(
                     "https://api.osv.dev/v1/querybatch",
-                    json={
-                        "queries": [
-                            {
-                                "version": version,
-                                "package": {"name": name, "ecosystem": ecosystem},
-                            }
-                            for (name, version), _package in batch
-                        ]
-                    },
+                    json={"queries": queries},
                 )
                 response.raise_for_status()
                 batch_results = response.json().get("results", [])
@@ -132,6 +135,16 @@ async def query_osv(
                         status.HTTP_502_BAD_GATEWAY,
                         "OSV returned an incomplete batch; scan was not saved",
                     )
+                for query, result in zip(queries, batch_results, strict=True):
+                    while result.get("next_page_token"):
+                        page = await client.post(
+                            "https://api.osv.dev/v1/query",
+                            json={**query, "page_token": result["next_page_token"]},
+                        )
+                        page.raise_for_status()
+                        page_result = page.json()
+                        result.setdefault("vulns", []).extend(page_result.get("vulns", []))
+                        result["next_page_token"] = page_result.get("next_page_token")
                 results.extend(batch_results)
             advisory_ids = {
                 str(item["id"])
@@ -139,18 +152,19 @@ async def query_osv(
                 for item in result.get("vulns", [])
                 if item.get("id")
             }
-            if len(advisory_ids) > 500:
-                raise HTTPException(
-                    status.HTTP_502_BAD_GATEWAY,
-                    "OSV returned an unexpectedly large advisory set; scan was not saved",
-                )
-            advisories = {}
-            for advisory_id in advisory_ids:
-                response = await client.get(
-                    f"https://api.osv.dev/v1/vulns/{quote(advisory_id, safe='')}"
-                )
-                response.raise_for_status()
-                advisories[advisory_id] = response.json()
+            semaphore = asyncio.Semaphore(10)
+
+            async def fetch_advisory(advisory_id: str) -> tuple[str, dict]:
+                async with semaphore:
+                    response = await client.get(
+                        f"https://api.osv.dev/v1/vulns/{quote(advisory_id, safe='')}"
+                    )
+                    response.raise_for_status()
+                    return advisory_id, response.json()
+
+            advisories = dict(
+                await asyncio.gather(*(fetch_advisory(item) for item in advisory_ids))
+            )
             return results, advisories
     except httpx.HTTPError as error:
         raise HTTPException(

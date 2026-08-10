@@ -207,7 +207,7 @@ async def heartbeat(
     agent: Annotated[Agent, Depends(authenticated_agent)],
 ) -> None:
     now = datetime.now(UTC)
-    if agent.last_heartbeat_at and agent.last_heartbeat_at > now - timedelta(seconds=5):
+    if agent.last_heartbeat_at and agent.last_heartbeat_at > now - timedelta(seconds=2):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "heartbeat rate limit exceeded")
     agent.version = payload.version
     agent.hostname = payload.hostname
