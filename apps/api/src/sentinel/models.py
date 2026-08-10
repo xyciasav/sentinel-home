@@ -188,6 +188,35 @@ class NotificationDelivery(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class DiscoveryRun(Base):
+    __tablename__ = "discovery_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    subnet: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    hosts_checked: Mapped[int] = mapped_column(Integer, default=0)
+    hosts_found: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DiscoveredHost(Base):
+    __tablename__ = "discovered_hosts"
+    __table_args__ = (Index("ix_discovered_hosts_run_address", "run_id", "address", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("discovery_runs.id", ondelete="CASCADE"), index=True
+    )
+    address: Mapped[str] = mapped_column(String(45))
+    open_ports: Mapped[str] = mapped_column(String(200))
+    state: Mapped[str] = mapped_column(String(20), default="new")
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL")
+    )
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
