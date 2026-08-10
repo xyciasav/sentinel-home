@@ -4,12 +4,14 @@ import logging
 import socket
 import time
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from sentinel.database import get_session_factory
-from sentinel.models import Device
+from sentinel.models import Device, MonitorResult, ServiceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,61 @@ async def check_device(device: Device) -> None:
         device.last_failure_reason = "connection failed"
 
 
+async def check_service(monitor: ServiceMonitor) -> MonitorResult:
+    checked_at = datetime.now(UTC)
+    monitor.last_checked_at = checked_at
+    started = time.perf_counter()
+    status_code = None
+    response_ms = None
+    failure_reason = None
+    success = False
+    try:
+        parsed = urlsplit(monitor.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("URL must use HTTP or HTTPS")
+        await resolve_safe_target(parsed.hostname)
+        async with httpx.AsyncClient(
+            timeout=monitor.timeout_seconds,
+            verify=monitor.verify_tls,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            response = await client.get(monitor.url)
+        response_ms = max(1, round((time.perf_counter() - started) * 1000))
+        status_code = response.status_code
+        if status_code != monitor.expected_status:
+            failure_reason = f"expected HTTP {monitor.expected_status}, received {status_code}"
+        elif monitor.expected_text and monitor.expected_text not in response.text:
+            failure_reason = "expected response text was not found"
+        else:
+            success = True
+    except ValueError as exc:
+        failure_reason = str(exc)
+    except httpx.TimeoutException:
+        failure_reason = "request timed out"
+    except httpx.HTTPError:
+        failure_reason = "request failed"
+
+    monitor.last_response_ms = response_ms
+    monitor.last_status_code = status_code
+    monitor.last_failure_reason = failure_reason
+    if success:
+        monitor.status = "up"
+        monitor.last_success_at = checked_at
+        monitor.outage_started_at = None
+    else:
+        monitor.status = "down"
+        monitor.outage_started_at = monitor.outage_started_at or checked_at
+    return MonitorResult(
+        monitor_id=monitor.id,
+        checked_at=checked_at,
+        success=success,
+        response_ms=response_ms,
+        status_code=status_code,
+        failure_reason=failure_reason,
+    )
+
+
 async def monitor_all_devices() -> None:
     async with get_session_factory()() as database:
         devices = list(
@@ -66,10 +123,25 @@ async def monitor_all_devices() -> None:
         await database.commit()
 
 
+async def monitor_all_services() -> None:
+    async with get_session_factory()() as database:
+        monitors = list(
+            await database.scalars(select(ServiceMonitor).where(ServiceMonitor.enabled.is_(True)))
+        )
+        semaphore = asyncio.Semaphore(10)
+
+        async def limited_check(monitor: ServiceMonitor) -> None:
+            async with semaphore:
+                database.add(await check_service(monitor))
+
+        await asyncio.gather(*(limited_check(monitor) for monitor in monitors))
+        await database.commit()
+
+
 async def monitoring_loop(interval_seconds: int = 30) -> None:
     while True:
         try:
-            await monitor_all_devices()
+            await asyncio.gather(monitor_all_devices(), monitor_all_services())
         except Exception:
-            logger.exception("device monitoring cycle failed")
+            logger.exception("monitoring cycle failed")
         await asyncio.sleep(interval_seconds)

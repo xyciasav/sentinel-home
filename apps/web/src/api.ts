@@ -6,6 +6,13 @@ export type Device = {
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
   last_failure_reason: string | null; notes: string | null;
 };
+export type ServiceMonitor = {
+  id:string; name:string; url:string; device_id:string|null; expected_status:number;
+  expected_text:string|null; timeout_seconds:number; verify_tls:boolean; enabled:boolean;
+  severity:string; status:string; last_checked_at:string|null; last_success_at:string|null;
+  outage_started_at:string|null; last_response_ms:number|null; last_status_code:number|null;
+  last_failure_reason:string|null;
+};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
@@ -53,6 +60,13 @@ export const api = {
     request<Device>(`/api/v1/devices/${id}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(payload) }),
   checkDevice: (id: string, csrfToken: string) =>
     request<Device>(`/api/v1/devices/${id}/check`, { method: "POST", headers: { "X-CSRF-Token": csrfToken } }),
+  monitors: () => request<ServiceMonitor[]>("/api/v1/monitors"),
+  createMonitor: (payload: Record<string, unknown>, csrfToken: string) =>
+    request<ServiceMonitor>("/api/v1/monitors", { method:"POST", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify(payload) }),
+  updateMonitor: (id:string, payload:Record<string,unknown>, csrfToken:string) =>
+    request<ServiceMonitor>(`/api/v1/monitors/${id}`, { method:"PUT", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify(payload) }),
+  checkMonitor: (id:string, csrfToken:string) =>
+    request<ServiceMonitor>(`/api/v1/monitors/${id}/check`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

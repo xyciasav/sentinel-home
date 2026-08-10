@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, Device, User } from "./api";
+import { api, Device, ServiceMonitor, User } from "./api";
 import { DevicesPage } from "./DevicesPage";
+import { ServicesPage } from "./ServicesPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -10,13 +11,14 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
-  const [page, setPage] = useState<"overview" | "devices">("overview");
+  const [page, setPage] = useState<"overview" | "devices" | "services">("overview");
   const [devices, setDevices] = useState<Device[]>([]);
+  const [monitors, setMonitors] = useState<ServiceMonitor[]>([]);
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
     if (view !== "dashboard") return;
-    const timer = window.setInterval(() => { void loadDevices(); }, 10000);
+    const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); }, 10000);
     return () => window.clearInterval(timer);
   }, [view]);
 
@@ -27,7 +29,7 @@ export function App() {
       try {
         const currentUser = await api.me();
         const token = await api.csrf();
-        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices();
+        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors();
       } catch { setView("login"); }
     } catch { setView("login"); }
   }
@@ -38,9 +40,10 @@ export function App() {
   }
 
   async function loadDevices() { setDevices(await api.devices()); }
+  async function loadMonitors() { setMonitors(await api.monitors()); }
 
   function authenticated(result: { user: User; csrf_token: string }) {
-    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices();
+    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors();
   }
 
   if (view === "loading") return <div className="center-screen"><div className="loader" /><p>Starting Sentinel…</p></div>;
@@ -50,19 +53,19 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button>{["Services","Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button>{["Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
       <div className="sidebar-bottom"><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : <>
+    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
         <StatusCard label="Devices" value={String(devices.length)} detail={devices.length ? `${devices.filter(device=>device.status==="online").length} currently online` : "No devices enrolled yet"} />
-        <StatusCard label="Active incidents" value="0" detail="Nothing needs attention" />
+        <StatusCard label="Services down" value={String(monitors.filter(m=>m.status==="down").length)} detail={`${monitors.length} service${monitors.length===1?"":"s"} monitored`} />
         <StatusCard label="Version" value={version} detail="Phase 2 foundation" />
       </section>
       <section className="content-grid">
-        <article className="panel getting-started"><div className="panel-title"><div><p className="eyebrow">GETTING STARTED</p><h2>Build your home inventory</h2></div><span>1 of 4</span></div><Step done title="Deploy Sentinel Home" text="Core services are healthy and persistent."/><Step active title="Add your first device" text="Manual device management is the next active increment."/><Step title="Install an endpoint agent" text="Linux and Windows agent enrollment follows inventory."/><Step title="Create a service monitor" text="Track HTTP, TCP, DNS, and TLS availability."/></article>
+        <article className="panel getting-started"><div className="panel-title"><div><p className="eyebrow">GETTING STARTED</p><h2>Build your home inventory</h2></div><span>{2+(monitors.length?1:0)} of 4</span></div><Step done title="Deploy Sentinel Home" text="Core services are healthy and persistent."/><Step done={devices.length>0} active={devices.length===0} title="Add your first device" text="Track systems on your private network."/><Step title="Install an endpoint agent" text="Linux and Windows agent enrollment follows inventory."/><Step done={monitors.length>0} active={devices.length>0&&monitors.length===0} title="Create a service monitor" text="Track local HTTP and HTTPS availability."/></article>
         <article className="panel posture"><p className="eyebrow">SECURITY POSTURE</p><h2>Protected by default</h2><ul><li><b>Administrator</b><span>Configured</span></li><li><b>Session security</b><span>Active</span></li><li><b>Network exposure</b><span>LAN only</span></li><li><b>Automated remediation</b><span>Disabled</span></li></ul><p className="quiet">No changes will be made to remote systems without explicit future opt-in.</p></article>
       </section>
     </>}</main>

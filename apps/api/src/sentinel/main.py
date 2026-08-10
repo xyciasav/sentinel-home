@@ -12,6 +12,7 @@ from sentinel.config import get_settings
 from sentinel.devices import router as devices_router
 from sentinel.health import database_status, redis_status
 from sentinel.monitoring import monitoring_loop
+from sentinel.services import router as services_router
 from sentinel.setup import router as setup_router
 
 
@@ -31,6 +32,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(devices_router)
+app.include_router(services_router)
 app.include_router(setup_router)
 web_root = Path("/app/web")
 if web_root.is_dir():

@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -74,6 +74,9 @@ class Device(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     addresses: Mapped[list["DeviceAddress"]] = relationship(cascade="all, delete-orphan")
+    service_monitors: Mapped[list["ServiceMonitor"]] = relationship(
+        back_populates="device", cascade="all, delete-orphan"
+    )
 
 
 class DeviceAddress(Base):
@@ -86,6 +89,48 @@ class DeviceAddress(Base):
     kind: Mapped[str] = mapped_column(String(10))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ServiceMonitor(Base):
+    __tablename__ = "service_monitors"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    url: Mapped[str] = mapped_column(String(2048))
+    expected_status: Mapped[int] = mapped_column(Integer, default=200)
+    expected_text: Mapped[str | None] = mapped_column(String(500))
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=5)
+    verify_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    severity: Mapped[str] = mapped_column(String(20), default="normal")
+    status: Mapped[str] = mapped_column(String(20), default="unknown")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outage_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_response_ms: Mapped[int | None] = mapped_column(Integer)
+    last_status_code: Mapped[int | None] = mapped_column(Integer)
+    last_failure_reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    device: Mapped[Device | None] = relationship(back_populates="service_monitors")
+    results: Mapped[list["MonitorResult"]] = relationship(cascade="all, delete-orphan")
+
+
+class MonitorResult(Base):
+    __tablename__ = "monitor_results"
+    __table_args__ = (Index("ix_monitor_results_monitor_checked", "monitor_id", "checked_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("service_monitors.id", ondelete="CASCADE")
+    )
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    success: Mapped[bool] = mapped_column(Boolean)
+    response_ms: Mapped[int | None] = mapped_column(Integer)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    failure_reason: Mapped[str | None] = mapped_column(String(500))
 
 
 class Agent(Base):
