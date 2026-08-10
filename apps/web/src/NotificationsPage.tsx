@@ -1,0 +1,8 @@
+import { useState } from "react";
+import { api, Notification } from "./api";
+
+export function NotificationsPage({notifications,csrf,refresh}:{notifications:Notification[];csrf:string;refresh:()=>Promise<void>}){
+  const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  async function test(){setBusy(true);setMessage("");try{const result=await api.testNotification(csrf);setMessage(result.status==="sent"?"Test email sent successfully.":result.error||`Test email ${result.status}.`);await refresh()}catch(error){setMessage(error instanceof Error?error.message:"Test failed")}finally{setBusy(false)}}
+  return <><header><div><p className="eyebrow">DELIVERY HISTORY</p><h1>Notifications</h1><p>Outage and recovery email delivery through Resend.</p></div><button className="primary compact" disabled={busy} onClick={test}>{busy?"Sending…":"Send test email"}</button></header>{message&&<div className="notice panel">{message}</div>}{notifications.length===0?<div className="empty-state panel"><div>✉</div><h2>No notifications yet</h2><p>Send a test email or wait for a future outage transition.</p></div>:<div className="device-list panel"><div className="notification-row heading"><span>Notification</span><span>Recipient</span><span>Status</span><span>Time</span></div>{notifications.map(item=><div className="notification-row" key={item.id}><span><b>{item.subject}</b><small>{item.kind}</small></span><span>{item.recipient||"Not configured"}</span><span title={item.error||""}><i className={`status-dot ${item.status==="sent"?"up":item.status==="failed"?"down":"paused"}`}/>{item.status}<small>{item.error}</small></span><span>{new Date(item.created_at).toLocaleString()}</span></div>)}</div>}</>;
+}

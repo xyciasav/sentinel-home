@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.database import get_session
 from sentinel.models import Incident, IncidentEvent, ServiceMonitor, Session, User
+from sentinel.notifications import send_email
 
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
@@ -61,6 +62,22 @@ async def record_monitor_transition(
             events=[IncidentEvent(kind="outage", message=reason, occurred_at=checked_at)],
         )
         database.add(incident)
+        await database.flush()
+        delivery = await send_email(
+            database,
+            "outage",
+            f"[{monitor.severity.title()}] {monitor.name} is unavailable",
+            f"Sentinel Home detected that {monitor.name} is unavailable.\n\n"
+            f"Reason: {reason}\nURL: {monitor.url}\nDetected: {checked_at.isoformat()}",
+            incident,
+        )
+        incident.events.append(
+            IncidentEvent(
+                kind="notification",
+                message=f"Outage email {delivery.status}.",
+                occurred_at=checked_at,
+            )
+        )
     elif monitor.status == "up" and active is not None:
         active.status = "recovered"
         active.recovered_at = checked_at
@@ -69,6 +86,22 @@ async def record_monitor_transition(
             IncidentEvent(
                 kind="recovery",
                 message=f"Service responded successfully in {monitor.last_response_ms or 0} ms.",
+                occurred_at=checked_at,
+            )
+        )
+        delivery = await send_email(
+            database,
+            "recovery",
+            f"[Recovered] {monitor.name} is available again",
+            f"Sentinel Home detected that {monitor.name} recovered.\n\n"
+            f"Response time: {monitor.last_response_ms or 0} ms\n"
+            f"Recovered: {checked_at.isoformat()}",
+            active,
+        )
+        active.events.append(
+            IncidentEvent(
+                kind="notification",
+                message=f"Recovery email {delivery.status}.",
                 occurred_at=checked_at,
             )
         )

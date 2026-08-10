@@ -2,14 +2,14 @@ name: sentinel-home
 
 services:
   api:
-    image: sentinel-home-api:${SENTINEL_VERSION:-0.8.1}
+    image: sentinel-home-api:${SENTINEL_VERSION:-0.9.0}
     pull_policy: build
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
       SENTINEL_ENVIRONMENT: production
-      SENTINEL_VERSION: ${SENTINEL_VERSION:-0.8.1}
+      SENTINEL_VERSION: ${SENTINEL_VERSION:-0.9.0}
       DATABASE_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Portainer}@postgres:5432/${POSTGRES_DB:-sentinel}
       REDIS_URL: redis://redis:6379/0
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in Portainer}
@@ -17,6 +17,9 @@ services:
       DETAILED_RETENTION_DAYS: ${DETAILED_RETENTION_DAYS:-30}
       SESSION_HOURS: ${SESSION_HOURS:-12}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-}
+      ALERT_TO_EMAIL: ${ALERT_TO_EMAIL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8080}:8080"]
     depends_on:
@@ -39,7 +42,7 @@ services:
       options: {max-size: 10m, max-file: "3"}
 
   migrate:
-    image: sentinel-home-api:${SENTINEL_VERSION:-0.8.1}
+    image: sentinel-home-api:${SENTINEL_VERSION:-0.9.0}
     pull_policy: build
     build:
       context: .

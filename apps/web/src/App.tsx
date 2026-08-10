@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, Device, Incident, ServiceMonitor, User } from "./api";
+import { api, Device, Incident, Notification, ServiceMonitor, User } from "./api";
 import { DevicesPage } from "./DevicesPage";
 import { ServicesPage } from "./ServicesPage";
 import { IncidentsPage } from "./IncidentsPage";
+import { NotificationsPage } from "./NotificationsPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -12,15 +13,16 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
-  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents">("overview");
+  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents" | "notifications">("overview");
   const [devices, setDevices] = useState<Device[]>([]);
   const [monitors, setMonitors] = useState<ServiceMonitor[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
     if (view !== "dashboard") return;
-    const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); void loadIncidents(); }, 10000);
+    const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); void loadIncidents(); void loadNotifications(); }, 10000);
     return () => window.clearInterval(timer);
   }, [view]);
 
@@ -31,7 +33,7 @@ export function App() {
       try {
         const currentUser = await api.me();
         const token = await api.csrf();
-        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents();
+        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents(); void loadNotifications();
       } catch { setView("login"); }
     } catch { setView("login"); }
   }
@@ -44,9 +46,10 @@ export function App() {
   async function loadDevices() { setDevices(await api.devices()); }
   async function loadMonitors() { setMonitors(await api.monitors()); }
   async function loadIncidents() { setIncidents(await api.incidents()); }
+  async function loadNotifications() { setNotifications(await api.notifications()); }
 
   function authenticated(result: { user: User; csrf_token: string }) {
-    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents();
+    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents(); void loadNotifications();
   }
 
   if (view === "loading") return <div className="center-screen"><div className="loader" /><p>Starting Sentinel…</p></div>;
@@ -56,10 +59,10 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button>{["Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={page==="notifications"?"active":""} onClick={()=>setPage("notifications")}>Notifications</button>{["Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
       <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : <>
+    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />

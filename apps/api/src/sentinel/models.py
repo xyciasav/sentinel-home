@@ -170,6 +170,24 @@ class IncidentEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (Index("ix_notification_deliveries_created_at", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(30))
+    recipient: Mapped[str | None] = mapped_column(String(320))
+    subject: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(20))
+    provider_id: Mapped[str | None] = mapped_column(String(100))
+    error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

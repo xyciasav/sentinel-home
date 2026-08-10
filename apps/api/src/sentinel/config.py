@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     sentinel_environment: Literal["development", "test", "production"] = "development"
-    sentinel_version: str = "0.8.1"
+    sentinel_version: str = "0.9.0"
     database_url: str | None = None
     redis_url: str | None = None
     session_secret: SecretStr | None = None
@@ -17,7 +17,19 @@ class Settings(BaseSettings):
     detailed_retention_days: int = Field(default=30, ge=1, le=365)
     session_hours: int = Field(default=12, ge=1, le=168)
     cookie_secure: bool = False
+    resend_api_key: SecretStr | None = None
+    alert_from_email: str | None = None
+    alert_to_email: str | None = None
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @property
+    def email_alerts_configured(self) -> bool:
+        return bool(
+            self.resend_api_key
+            and self.resend_api_key.get_secret_value().strip()
+            and self.alert_from_email
+            and self.alert_to_email
+        )
 
     @model_validator(mode="after")
     def production_requires_secrets_and_dependencies(self) -> "Settings":
