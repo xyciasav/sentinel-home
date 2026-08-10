@@ -53,9 +53,10 @@ async def send_email(
             response = await client.post(
                 "https://api.resend.com/emails",
                 headers={
-                    "Authorization": f"Bearer {settings.resend_api_key.get_secret_value()}",
+                    "Authorization": f"Bearer {settings.resend_api_key.get_secret_value().strip()}",
                     "Content-Type": "application/json",
                     "Idempotency-Key": f"sentinel-{delivery.id}",
+                    "User-Agent": f"sentinel-home/{settings.sentinel_version}",
                 },
                 json={
                     "from": settings.alert_from_email,
@@ -68,6 +69,13 @@ async def send_email(
             delivery.provider_id = response.json().get("id")
             delivery.status = "sent"
             delivery.sent_at = datetime.now(UTC)
+    except httpx.HTTPStatusError as error:
+        delivery.status = "failed"
+        try:
+            detail = error.response.json().get("message") or error.response.text
+        except ValueError:
+            detail = error.response.text
+        delivery.error = f"Resend HTTP {error.response.status_code}: {detail}"[:500]
     except (httpx.HTTPError, ValueError) as error:
         delivery.status = "failed"
         delivery.error = str(error)[:500]
