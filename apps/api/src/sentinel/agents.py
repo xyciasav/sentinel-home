@@ -258,3 +258,24 @@ async def list_agents(
             )
         )
     return result
+
+
+@router.delete("/{agent_id}", status_code=204)
+async def delete_agent(
+    agent_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    agent = await database.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="agent.delete",
+            target_type="agent",
+            target_id=str(agent.id),
+        )
+    )
+    await database.delete(agent)
+    await database.commit()

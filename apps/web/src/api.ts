@@ -111,6 +111,7 @@ export const api = {
   actionItems: () => request<ActionItem[]>("/api/v1/actions"),
   agents: () => request<Agent[]>("/api/v1/agents"),
   createAgentEnrollment: (device_id:string,csrfToken:string) => request<AgentEnrollment>("/api/v1/agents/enrollments",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({device_id})}),
+  deleteAgent: (id:string,csrfToken:string) => request<void>(`/api/v1/agents/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":csrfToken}}),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };
