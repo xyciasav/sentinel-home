@@ -67,6 +67,8 @@ export const api = {
     request<ServiceMonitor>(`/api/v1/monitors/${id}`, { method:"PUT", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify(payload) }),
   checkMonitor: (id:string, csrfToken:string) =>
     request<ServiceMonitor>(`/api/v1/monitors/${id}/check`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
+  deleteMonitor: (id:string, csrfToken:string) =>
+    request<void>(`/api/v1/monitors/${id}`, { method:"DELETE", headers:{"X-CSRF-Token":csrfToken} }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

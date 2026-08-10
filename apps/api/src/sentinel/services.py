@@ -122,3 +122,24 @@ async def check_monitor_now(
     database.add(await check_service(monitor))
     await database.commit()
     return monitor_view(monitor)
+
+
+@router.delete("/{monitor_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_monitor(
+    monitor_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    authenticated: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    monitor = await database.get(ServiceMonitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "service monitor not found")
+    database.add(
+        AuditEvent(
+            actor_user_id=authenticated[0].id,
+            action="monitor.delete",
+            target_type="monitor",
+            target_id=str(monitor.id),
+        )
+    )
+    await database.delete(monitor)
+    await database.commit()
