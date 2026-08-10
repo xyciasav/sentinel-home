@@ -7,7 +7,7 @@ export type Device = {
   last_failure_reason: string | null; notes: string | null;
 };
 export type ServiceMonitor = {
-  id:string; name:string; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
+  id:string; name:string; group_name:string|null; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
   expected_text:string|null; timeout_seconds:number; verify_tls:boolean; enabled:boolean;
   severity:string; status:string; last_checked_at:string|null; last_success_at:string|null;
   outage_started_at:string|null; last_response_ms:number|null; last_status_code:number|null;

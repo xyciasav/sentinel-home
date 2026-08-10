@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, Device, ServiceMonitor, User } from "./api";
 import { DevicesPage } from "./DevicesPage";
-import { ServicesPage } from "./ServicesPage";
+import { logicalServices, ServicesPage } from "./ServicesPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -61,7 +61,7 @@ export function App() {
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
         <StatusCard label="Devices" value={String(devices.length)} detail={devices.length ? `${devices.filter(device=>device.status==="online").length} currently online` : "No devices enrolled yet"} />
-        <StatusCard label="Services down" value={String(monitors.filter(m=>m.status==="down").length)} detail={`${monitors.length} service${monitors.length===1?"":"s"} monitored`} />
+        <StatusCard label="Services down" value={String(countServicesDown(monitors))} detail={`${logicalServiceCount(monitors)} logical service${logicalServiceCount(monitors)===1?"":"s"} monitored`} />
         <StatusCard label="Version" value={version} detail="Phase 2 foundation" />
       </section>
       <section className="content-grid">
@@ -82,3 +82,5 @@ function AuthScreen({mode,onSuccess}:{mode:"setup"|"login";onSuccess:(result:{us
 
 function StatusCard({label,value,detail,tone}:{label:string;value:string;detail:string;tone?:string}){return <article className="status-card"><p>{label}</p><strong className={tone}>{value}</strong><small>{detail}</small></article>}
 function Step({title,text,done,active}:{title:string;text:string;done?:boolean;active?:boolean}){return <div className={`step ${active?"active":""}`}><span>{done?"✓":""}</span><div><b>{title}</b><p>{text}</p></div></div>}
+function logicalServiceCount(monitors:ServiceMonitor[]){const grouped=new Set(monitors.map(m=>m.group_name).filter(Boolean));return grouped.size+monitors.filter(m=>!m.group_name).length}
+function countServicesDown(monitors:ServiceMonitor[]){return logicalServices(monitors).filter(group=>group.status==="down").length+monitors.filter(m=>!m.group_name&&m.status==="down").length}

@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1/monitors", tags=["service monitors"])
 
 class MonitorInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    group_name: str | None = Field(default=None, max_length=100)
     target_scope: str = Field(default="internal", pattern=r"^(internal|external)$")
     url: AnyHttpUrl
     device_id: uuid.UUID | None = None
@@ -31,6 +32,7 @@ class MonitorInput(BaseModel):
 class MonitorView(BaseModel):
     id: uuid.UUID
     name: str
+    group_name: str | None
     target_scope: str
     url: str
     device_id: uuid.UUID | None
@@ -70,7 +72,11 @@ async def save_monitor(
     action: str,
 ) -> MonitorView:
     for field, value in payload.model_dump().items():
-        setattr(monitor, field, str(value) if field == "url" else value)
+        if field == "url":
+            value = str(value)
+        elif field == "group_name" and value is not None:
+            value = value.strip() or None
+        setattr(monitor, field, value)
     database.add(monitor)
     await database.flush()
     if monitor.enabled:
