@@ -16,14 +16,24 @@ from sentinel.models import Device, MonitorResult, ServiceMonitor
 logger = logging.getLogger(__name__)
 
 
-async def resolve_safe_target(target: str) -> str:
+def is_internal_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
+async def resolve_target(target: str, scope: str = "internal") -> str:
     loop = asyncio.get_running_loop()
     addresses = await loop.getaddrinfo(target, None, type=socket.SOCK_STREAM)
-    for address in addresses:
-        candidate = ipaddress.ip_address(address[4][0])
-        if candidate.is_private or candidate.is_loopback or candidate.is_link_local:
-            return str(candidate)
-    raise ValueError("target did not resolve to a private network address")
+    candidates = {ipaddress.ip_address(address[4][0]) for address in addresses}
+    if scope == "internal" and candidates and all(is_internal_address(item) for item in candidates):
+        return str(next(iter(candidates)))
+    if scope == "external" and candidates and all(item.is_global for item in candidates):
+        return str(next(iter(candidates)))
+    expected = "private/local" if scope == "internal" else "public"
+    raise ValueError(f"target did not resolve exclusively to {expected} network addresses")
+
+
+async def resolve_safe_target(target: str) -> str:
+    return await resolve_target(target, "internal")
 
 
 async def check_device(device: Device) -> None:
@@ -65,7 +75,9 @@ async def check_service(monitor: ServiceMonitor) -> MonitorResult:
         parsed = urlsplit(monitor.url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("URL must use HTTP or HTTPS")
-        await resolve_safe_target(parsed.hostname)
+        if parsed.username or parsed.password:
+            raise ValueError("URL credentials are not allowed")
+        await resolve_target(parsed.hostname, monitor.target_scope or "internal")
         async with httpx.AsyncClient(
             timeout=monitor.timeout_seconds,
             verify=monitor.verify_tls,

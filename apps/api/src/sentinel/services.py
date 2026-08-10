@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1/monitors", tags=["service monitors"])
 
 class MonitorInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    target_scope: str = Field(default="internal", pattern=r"^(internal|external)$")
     url: AnyHttpUrl
     device_id: uuid.UUID | None = None
     expected_status: int = Field(default=200, ge=100, le=599)
@@ -30,6 +31,7 @@ class MonitorInput(BaseModel):
 class MonitorView(BaseModel):
     id: uuid.UUID
     name: str
+    target_scope: str
     url: str
     device_id: uuid.UUID | None
     expected_status: int

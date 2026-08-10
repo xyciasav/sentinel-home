@@ -1,7 +1,7 @@
 import uuid
 
 from sentinel.models import Device, ServiceMonitor
-from sentinel.monitoring import check_device, check_service
+from sentinel.monitoring import check_device, check_service, resolve_target
 
 
 async def test_device_without_port_is_unmonitored() -> None:
@@ -24,4 +24,17 @@ async def test_service_rejects_public_targets() -> None:
     assert result.success is False
     assert monitor.status == "down"
     assert monitor.outage_started_at is not None
-    assert monitor.last_failure_reason == "target did not resolve to a private network address"
+    assert monitor.last_failure_reason == (
+        "target did not resolve exclusively to private/local network addresses"
+    )
+
+
+async def test_external_scope_accepts_only_public_targets() -> None:
+    assert await resolve_target("8.8.8.8", "external") == "8.8.8.8"
+
+    try:
+        await resolve_target("127.0.0.1", "external")
+    except ValueError as error:
+        assert "public network addresses" in str(error)
+    else:
+        raise AssertionError("external monitoring accepted a loopback target")

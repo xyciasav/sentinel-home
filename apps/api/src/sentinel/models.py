@@ -99,6 +99,7 @@ class ServiceMonitor(Base):
         ForeignKey("devices.id", ondelete="SET NULL"), index=True
     )
     name: Mapped[str] = mapped_column(String(100))
+    target_scope: Mapped[str] = mapped_column(String(20), default="internal")
     url: Mapped[str] = mapped_column(String(2048))
     expected_status: Mapped[int] = mapped_column(Integer, default=200)
     expected_text: Mapped[str | None] = mapped_column(String(500))
