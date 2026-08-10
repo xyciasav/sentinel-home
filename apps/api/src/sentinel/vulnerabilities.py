@@ -6,7 +6,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +27,21 @@ class FindingView(BaseModel):
     description: str
     severity: str
     cvss_score: str | None
+    known_exploited: bool
+    required_action: str | None
+    action_due: str | None
     cpe: str
     status: str
+    user_notes: str | None
     first_seen_at: datetime
     last_seen_at: datetime
+
+
+class FindingUpdate(BaseModel):
+    status: str = Field(
+        pattern=r"^(open|investigating|accepted_risk|false_positive|resolved|ignored)$"
+    )
+    user_notes: str | None = Field(default=None, max_length=4000)
 
 
 def cvss(cve: dict) -> tuple[str, str | None]:
@@ -122,6 +133,9 @@ async def scan_host(
                         description=description,
                         severity=severity,
                         cvss_score=score,
+                        known_exploited=bool(cve.get("cisaExploitAdd")),
+                        required_action=cve.get("cisaRequiredAction"),
+                        action_due=cve.get("cisaActionDue"),
                         cpe=cpe,
                         status="open",
                         first_seen_at=now,
@@ -130,6 +144,25 @@ async def scan_host(
                     database.add(item)
                 else:
                     item.last_seen_at = now
+                    item.known_exploited = bool(cve.get("cisaExploitAdd"))
+                    item.required_action = cve.get("cisaRequiredAction")
+                    item.action_due = cve.get("cisaActionDue")
                 found.append(item)
     await database.commit()
     return found
+
+
+@router.put("/{finding_id}", response_model=FindingView)
+async def update_finding(
+    finding_id: uuid.UUID,
+    payload: FindingUpdate,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> VulnerabilityFinding:
+    finding = await database.get(VulnerabilityFinding, finding_id)
+    if finding is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "vulnerability finding not found")
+    finding.status = payload.status
+    finding.user_notes = payload.user_notes.strip() if payload.user_notes else None
+    await database.commit()
+    return finding

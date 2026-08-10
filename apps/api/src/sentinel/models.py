@@ -247,8 +247,12 @@ class VulnerabilityFinding(Base):
     description: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String(20))
     cvss_score: Mapped[str | None] = mapped_column(String(10))
+    known_exploited: Mapped[bool] = mapped_column(Boolean, default=False)
+    required_action: Mapped[str | None] = mapped_column(Text)
+    action_due: Mapped[str | None] = mapped_column(String(20))
     cpe: Mapped[str] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(30), default="open")
+    user_notes: Mapped[str | None] = mapped_column(Text)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
