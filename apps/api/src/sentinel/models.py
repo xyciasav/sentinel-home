@@ -396,6 +396,29 @@ class InstalledPackage(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class RemediationPlan(Base):
+    __tablename__ = "remediation_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    finding_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("vulnerability_findings.id", ondelete="CASCADE"), unique=True
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    package_name: Mapped[str] = mapped_column(String(255))
+    installed_version: Mapped[str] = mapped_column(String(255))
+    target_version: Mapped[str] = mapped_column(String(255))
+    operation: Mapped[str] = mapped_column(String(30), default="package_upgrade")
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (Index("ix_audit_events_created_at", "created_at"),)
