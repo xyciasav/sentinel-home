@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 
 def request(url: str, payload: dict, token: str | None = None) -> dict:
@@ -96,7 +96,19 @@ def telemetry(include_packages: bool) -> dict:
         "disk_free_bytes": disk.free,
         "disk_total_bytes": disk.total,
         "uptime_seconds": round(float(Path("/proc/uptime").read_text().split()[0])),
+        "hostname": platform.node(),
+        "kernel_version": platform.release(),
     }
+    os_release = {}
+    try:
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                os_release[key] = value.strip().strip('"')
+    except OSError:
+        pass
+    payload["os_name"] = os_release.get("ID") or platform.system()
+    payload["os_version"] = os_release.get("VERSION_ID") or platform.version()
     if include_packages:
         payload["packages"] = packages()
     return payload

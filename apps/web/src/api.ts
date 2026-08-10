@@ -27,8 +27,10 @@ export type ReportWindow = {checks:number;successful:number;uptime_percent:numbe
 export type ServiceReport = {id:string;name:string;status:string;checks:number;uptime_percent:number|null;average_response_ms:number|null};
 export type OverviewReport = {generated_at:string;last_24_hours:ReportWindow;last_7_days:ReportWindow;services:ServiceReport[];open_incidents:number;incidents_7_days:number;network_changes_7_days:number;active_vulnerabilities:Record<string,number>;known_exploited:number;storage_recommendations:number;storage_flagged_bytes:number};
 export type ActionItem = {finding_id:string;cve_id:string;title:string;severity:string;cvss_score:string|null;known_exploited:boolean;required_action:string|null;action_due:string|null;finding_status:string;address:string;device_name:string|null;device_criticality:string|null;automation_ready:boolean;automation_blocker:string;priority:number};
-export type Agent = {id:string;device_id:string;device_name:string;version:string;platform:string;last_heartbeat_at:string|null;connected:boolean;cpu_percent:number|null;memory_percent:number|null;disk_percent:number|null;disk_free_bytes:number|null;uptime_seconds:number|null;package_count:number};
+export type Agent = {id:string;device_id:string;device_name:string;version:string;platform:string;hostname:string|null;os_name:string|null;os_version:string|null;kernel_version:string|null;last_heartbeat_at:string|null;connected:boolean;cpu_percent:number|null;memory_percent:number|null;disk_percent:number|null;disk_free_bytes:number|null;uptime_seconds:number|null;package_count:number};
 export type AgentEnrollment = {enrollment_token:string;expires_at:string};
+export type AgentMetric = {cpu_percent:number;memory_percent:number;disk_percent:number;disk_free_bytes:number;uptime_seconds:number;collected_at:string};
+export type InstalledPackage = {name:string;version:string;architecture:string|null;manager:string;observed_at:string};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
@@ -112,6 +114,8 @@ export const api = {
   agents: () => request<Agent[]>("/api/v1/agents"),
   createAgentEnrollment: (device_id:string,csrfToken:string) => request<AgentEnrollment>("/api/v1/agents/enrollments",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({device_id})}),
   deleteAgent: (id:string,csrfToken:string) => request<void>(`/api/v1/agents/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":csrfToken}}),
+  agentMetrics: (id:string) => request<AgentMetric[]>(`/api/v1/agents/${id}/metrics`),
+  agentPackages: (id:string,search="") => request<InstalledPackage[]>(`/api/v1/agents/${id}/packages${search?`?search=${encodeURIComponent(search)}`:""}`),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

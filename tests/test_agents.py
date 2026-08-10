@@ -9,7 +9,7 @@ def test_linux_agent_postpones_newer_type_annotation_evaluation() -> None:
     source = Path("agents/linux/sentinel_agent.py").read_text(encoding="utf-8")
 
     assert "from __future__ import annotations" in source
-    assert 'VERSION = "0.1.1"' in source
+    assert 'VERSION = "0.2.0"' in source
 
 
 def test_agent_heartbeat_validates_resource_ranges() -> None:
@@ -38,7 +38,12 @@ def test_agent_heartbeat_accepts_package_inventory() -> None:
         disk_free_bytes=1,
         disk_total_bytes=2,
         uptime_seconds=60,
+        hostname="server-one",
+        os_name="debian",
+        os_version="12",
+        kernel_version="6.1.0",
         packages=[{"name": "openssl", "version": "3.0", "manager": "dpkg"}],
     )
 
     assert heartbeat.packages and heartbeat.packages[0].name == "openssl"
+    assert heartbeat.os_name == "debian"

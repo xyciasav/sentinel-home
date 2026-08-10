@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +61,10 @@ class HeartbeatInput(BaseModel):
     disk_free_bytes: int = Field(ge=0)
     disk_total_bytes: int = Field(ge=1)
     uptime_seconds: int = Field(ge=0)
+    hostname: str | None = Field(default=None, max_length=255)
+    os_name: str | None = Field(default=None, max_length=100)
+    os_version: str | None = Field(default=None, max_length=100)
+    kernel_version: str | None = Field(default=None, max_length=100)
     packages: list[PackageInput] | None = Field(default=None, max_length=20_000)
 
 
@@ -70,6 +74,10 @@ class AgentView(BaseModel):
     device_name: str
     version: str
     platform: str
+    hostname: str | None
+    os_name: str | None
+    os_version: str | None
+    kernel_version: str | None
     last_heartbeat_at: datetime | None
     connected: bool
     cpu_percent: int | None
@@ -78,6 +86,23 @@ class AgentView(BaseModel):
     disk_free_bytes: int | None
     uptime_seconds: int | None
     package_count: int
+
+
+class MetricView(BaseModel):
+    cpu_percent: int
+    memory_percent: int
+    disk_percent: int
+    disk_free_bytes: int
+    uptime_seconds: int
+    collected_at: datetime
+
+
+class PackageView(BaseModel):
+    name: str
+    version: str
+    architecture: str | None
+    manager: str
+    observed_at: datetime
 
 
 async def authenticated_agent(
@@ -181,6 +206,10 @@ async def heartbeat(
     if agent.last_heartbeat_at and agent.last_heartbeat_at > now - timedelta(seconds=5):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "heartbeat rate limit exceeded")
     agent.version = payload.version
+    agent.hostname = payload.hostname
+    agent.os_name = payload.os_name
+    agent.os_version = payload.os_version
+    agent.kernel_version = payload.kernel_version
     agent.last_heartbeat_at = now
     database.add(
         AgentMetric(
@@ -244,6 +273,10 @@ async def list_agents(
                 device_name=device.display_name,
                 version=agent.version,
                 platform=agent.platform,
+                hostname=agent.hostname,
+                os_name=agent.os_name,
+                os_version=agent.os_version,
+                kernel_version=agent.kernel_version,
                 last_heartbeat_at=agent.last_heartbeat_at,
                 connected=bool(
                     agent.last_heartbeat_at
@@ -258,6 +291,41 @@ async def list_agents(
             )
         )
     return result
+
+
+@router.get("/{agent_id}/metrics", response_model=list[MetricView])
+async def agent_metrics(
+    agent_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+    limit: Annotated[int, Query(ge=1, le=1000)] = 240,
+) -> list[AgentMetric]:
+    if await database.get(Agent, agent_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    items = list(
+        await database.scalars(
+            select(AgentMetric)
+            .where(AgentMetric.agent_id == agent_id)
+            .order_by(AgentMetric.collected_at.desc())
+            .limit(limit)
+        )
+    )
+    return list(reversed(items))
+
+
+@router.get("/{agent_id}/packages", response_model=list[PackageView])
+async def agent_packages(
+    agent_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+    search: Annotated[str | None, Query(max_length=100)] = None,
+) -> list[InstalledPackage]:
+    if await database.get(Agent, agent_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "agent not found")
+    query = select(InstalledPackage).where(InstalledPackage.agent_id == agent_id)
+    if search:
+        query = query.where(InstalledPackage.name.ilike(f"%{search}%"))
+    return list(await database.scalars(query.order_by(InstalledPackage.name).limit(500)))
 
 
 @router.delete("/{agent_id}", status_code=204)

@@ -3,16 +3,17 @@ import ipaddress
 import logging
 import socket
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
+from sentinel.config import get_settings
 from sentinel.database import get_session_factory
 from sentinel.incidents import record_monitor_transition
-from sentinel.models import Device, MonitorResult, ServiceMonitor
+from sentinel.models import AgentMetric, Device, MonitorResult, ServiceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +150,24 @@ async def monitor_all_services() -> None:
         await database.commit()
 
 
+async def remove_expired_agent_metrics() -> int:
+    cutoff = datetime.now(UTC) - timedelta(days=get_settings().detailed_retention_days)
+    async with get_session_factory()() as database:
+        result = await database.execute(
+            delete(AgentMetric).where(AgentMetric.collected_at < cutoff)
+        )
+        await database.commit()
+        return result.rowcount or 0
+
+
 async def monitoring_loop(interval_seconds: int = 30) -> None:
+    next_retention = 0.0
     while True:
         try:
             await asyncio.gather(monitor_all_devices(), monitor_all_services())
+            if time.monotonic() >= next_retention:
+                await remove_expired_agent_metrics()
+                next_retention = time.monotonic() + 3600
         except Exception:
             logger.exception("monitoring cycle failed")
         await asyncio.sleep(interval_seconds)
