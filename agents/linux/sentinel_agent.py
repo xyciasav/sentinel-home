@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Sentinel Home Linux telemetry agent. Uses only the Python standard library."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -13,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 def request(url: str, payload: dict, token: str | None = None) -> dict:

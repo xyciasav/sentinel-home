@@ -6,6 +6,7 @@ set -eu
 
 test "$(id -u)" -eq 0 || { echo "Run this installer with sudo" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "Python 3 is required" >&2; exit 1; }
+python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)' || { echo "Python 3.8 or newer is required" >&2; exit 1; }
 
 id sentinel-agent >/dev/null 2>&1 || useradd --system --home-dir /var/lib/sentinel-agent --shell /usr/sbin/nologin sentinel-agent
 install -d -o sentinel-agent -g sentinel-agent -m 0700 /var/lib/sentinel-agent

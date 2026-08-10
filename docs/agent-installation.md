@@ -2,6 +2,8 @@
 
 The Linux agent reports CPU, memory, root-filesystem capacity, uptime, and installed DEB/RPM packages. It does not accept commands or read file contents.
 
+Python 3.8 or newer and systemd are required on the monitored host.
+
 ## Install
 
 1. Add the Linux host to **Devices** in Sentinel.
