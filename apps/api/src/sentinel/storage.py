@@ -11,12 +11,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
-from sentinel.database import get_session
-from sentinel.models import AuditEvent, Session, StorageFinding, StorageTarget, User
+from sentinel.database import get_session, get_session_factory
+from sentinel.models import AuditEvent, Session, StorageFinding, StorageScanJob, StorageTarget, User
 
 router = APIRouter(prefix="/api/v1/storage", tags=["storage analysis"])
 SCAN_ROOT = Path("/scan")
 MAX_FILES = 250_000
+running_tasks: set[asyncio.Task] = set()
 
 
 class TargetInput(BaseModel):
@@ -60,6 +61,20 @@ class TargetView(BaseModel):
     last_total_bytes: int
     last_file_count: int
     findings: list[FindingView] = Field(default_factory=list)
+
+
+class JobView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    target_id: uuid.UUID
+    status: str
+    files_scanned: int
+    findings_count: int
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
 
 
 def resolve_target(relative: str) -> Path:
@@ -179,22 +194,103 @@ async def create_target(
     )
 
 
-@router.post("/targets/{target_id}/scan", response_model=TargetView)
+def start_job(job_id: uuid.UUID) -> None:
+    task = asyncio.create_task(run_storage_job(job_id))
+    running_tasks.add(task)
+    task.add_done_callback(running_tasks.discard)
+
+
+async def run_storage_job(job_id: uuid.UUID) -> None:
+    factory = get_session_factory()
+    async with factory() as database:
+        job = await database.get(StorageScanJob, job_id)
+        if job is None:
+            return
+        target = await database.get(StorageTarget, job.target_id)
+        if target is None:
+            job.status = "failed"
+            job.error = "storage target no longer exists"
+            job.completed_at = datetime.now(UTC)
+            await database.commit()
+            return
+        job.status = "running"
+        job.started_at = datetime.now(UTC)
+        job.error = None
+        await database.commit()
+        try:
+            root = resolve_target(target.relative_path)
+            findings, total, count = await asyncio.to_thread(collect_findings, root, target)
+            await database.execute(
+                delete(StorageFinding).where(StorageFinding.target_id == target.id)
+            )
+            database.add_all(findings)
+            target.last_scanned_at = datetime.now(UTC)
+            target.last_total_bytes = total
+            target.last_file_count = count
+            job.files_scanned = count
+            job.findings_count = len(findings)
+            job.status = "completed"
+            job.completed_at = datetime.now(UTC)
+            await database.commit()
+        except Exception as error:
+            await database.rollback()
+            job = await database.get(StorageScanJob, job_id)
+            if job is not None:
+                job.status = "failed"
+                job.error = str(getattr(error, "detail", error))[:500]
+                job.completed_at = datetime.now(UTC)
+                await database.commit()
+
+
+async def recover_storage_jobs() -> None:
+    async with get_session_factory()() as database:
+        job_ids = list(
+            await database.scalars(
+                select(StorageScanJob.id).where(StorageScanJob.status.in_(("queued", "running")))
+            )
+        )
+        if job_ids:
+            await database.execute(
+                StorageScanJob.__table__.update()
+                .where(StorageScanJob.id.in_(job_ids))
+                .values(status="queued", error="resumed after service restart")
+            )
+            await database.commit()
+    for job_id in job_ids:
+        start_job(job_id)
+
+
+@router.get("/jobs", response_model=list[JobView])
+async def list_jobs(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[StorageScanJob]:
+    return list(
+        await database.scalars(
+            select(StorageScanJob).order_by(StorageScanJob.created_at.desc()).limit(100)
+        )
+    )
+
+
+@router.post("/targets/{target_id}/scan", response_model=JobView, status_code=202)
 async def scan_target(
     target_id: uuid.UUID,
     database: Annotated[AsyncSession, Depends(get_session)],
     auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
-) -> TargetView:
+) -> StorageScanJob:
     target = await database.get(StorageTarget, target_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "storage target not found")
-    root = resolve_target(target.relative_path)
-    findings, total, count = await asyncio.to_thread(collect_findings, root, target)
-    await database.execute(delete(StorageFinding).where(StorageFinding.target_id == target.id))
-    database.add_all(findings)
-    target.last_scanned_at = datetime.now(UTC)
-    target.last_total_bytes = total
-    target.last_file_count = count
+    resolve_target(target.relative_path)
+    active = await database.scalar(
+        select(StorageScanJob).where(
+            StorageScanJob.target_id == target.id, StorageScanJob.status.in_(("queued", "running"))
+        )
+    )
+    if active is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "a scan is already queued or running")
+    job = StorageScanJob(target_id=target.id)
+    database.add(job)
     database.add(
         AuditEvent(
             actor_user_id=auth[0].id,
@@ -204,10 +300,8 @@ async def scan_target(
         )
     )
     await database.commit()
-    return TargetView(
-        **{name: getattr(target, name) for name in TargetView.model_fields if name != "findings"},
-        findings=sorted(findings, key=lambda item: item.size_bytes, reverse=True)[:200],
-    )
+    start_job(job.id)
+    return job
 
 
 @router.delete("/targets/{target_id}", status_code=204)

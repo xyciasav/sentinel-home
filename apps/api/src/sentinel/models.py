@@ -300,6 +300,23 @@ class StorageFinding(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class StorageScanJob(Base):
+    __tablename__ = "storage_scan_jobs"
+    __table_args__ = (Index("ix_storage_scan_jobs_created", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("storage_targets.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    files_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    findings_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

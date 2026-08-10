@@ -18,6 +18,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Authenticated device inventory with safe private-network TCP monitoring every 30 seconds
 - Read-only storage metadata scans with large/stale file recommendations and protected paths
 - Real-data reports for service uptime, response times, incidents, vulnerabilities, network changes, and storage findings
+- Persistent background storage jobs and a prioritized Linux remediation Action Center
 
 ## Quick start
 
