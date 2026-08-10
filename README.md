@@ -19,6 +19,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Read-only storage metadata scans with large/stale file recommendations and protected paths
 - Real-data reports for service uptime, response times, incidents, vulnerabilities, network changes, and storage findings
 - Persistent background storage jobs and a prioritized Linux remediation Action Center
+- One-time Linux agent enrollment with live CPU, memory, disk, uptime, and package inventory
 
 ## Quick start
 
@@ -60,6 +61,7 @@ python -m venv .venv
 - [Data model](docs/data-model.md)
 - [API outline](docs/api.md)
 - [Agent protocol](docs/agent-protocol.md)
+- [Linux agent installation](docs/agent-installation.md)
 - [Roadmap](docs/roadmap.md)
 - [Deployment](docs/deployment.md)
 

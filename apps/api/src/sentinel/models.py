@@ -332,6 +332,52 @@ class Agent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class AgentEnrollment(Base):
+    __tablename__ = "agent_enrollments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("devices.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentMetric(Base):
+    __tablename__ = "agent_metrics"
+    __table_args__ = (Index("ix_agent_metrics_agent_collected", "agent_id", "collected_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    cpu_percent: Mapped[int] = mapped_column(Integer)
+    memory_percent: Mapped[int] = mapped_column(Integer)
+    memory_used_bytes: Mapped[int] = mapped_column(BigInteger)
+    memory_total_bytes: Mapped[int] = mapped_column(BigInteger)
+    disk_percent: Mapped[int] = mapped_column(Integer)
+    disk_free_bytes: Mapped[int] = mapped_column(BigInteger)
+    disk_total_bytes: Mapped[int] = mapped_column(BigInteger)
+    uptime_seconds: Mapped[int] = mapped_column(BigInteger)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class InstalledPackage(Base):
+    __tablename__ = "installed_packages"
+    __table_args__ = (Index("ix_installed_packages_agent_name", "agent_id", "name", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(255))
+    version: Mapped[str] = mapped_column(String(255))
+    architecture: Mapped[str | None] = mapped_column(String(50))
+    manager: Mapped[str] = mapped_column(String(30))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (Index("ix_audit_events_created_at", "created_at"),)

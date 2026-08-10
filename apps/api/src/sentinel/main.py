@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from sentinel.actions import router as actions_router
+from sentinel.agents import router as agents_router
 from sentinel.auth import router as auth_router
 from sentinel.config import get_settings
 from sentinel.devices import router as devices_router
@@ -40,6 +41,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
 app.include_router(actions_router)
+app.include_router(agents_router)
 app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(discovery_router)
