@@ -2,7 +2,18 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -255,6 +266,38 @@ class VulnerabilityFinding(Base):
     user_notes: Mapped[str | None] = mapped_column(Text)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class StorageTarget(Base):
+    __tablename__ = "storage_targets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))
+    relative_path: Mapped[str] = mapped_column(String(500), unique=True)
+    large_file_bytes: Mapped[int] = mapped_column(BigInteger, default=1_073_741_824)
+    old_file_days: Mapped[int] = mapped_column(Integer, default=365)
+    protected_paths: Mapped[str] = mapped_column(Text, default="")
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_file_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class StorageFinding(Base):
+    __tablename__ = "storage_findings"
+    __table_args__ = (Index("ix_storage_findings_target_path", "target_id", "relative_path"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("storage_targets.id", ondelete="CASCADE"), index=True
+    )
+    relative_path: Mapped[str] = mapped_column(String(1000))
+    item_type: Mapped[str] = mapped_column(String(30), default="file")
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(300))
+    protected: Mapped[bool] = mapped_column(Boolean, default=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class Agent(Base):

@@ -16,6 +16,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Hashed server-side sessions, CSRF-protected logout, and authentication audit events
 - Responsive first-run, login, and overview web interface
 - Authenticated device inventory with safe private-network TCP monitoring every 30 seconds
+- Read-only storage metadata scans with large/stale file recommendations and protected paths
 
 ## Quick start
 
@@ -24,6 +25,8 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 3. Open `http://127.0.0.1:8080/api/v1/health/ready`.
 
 For Portainer, set `POSTGRES_PASSWORD`, `SESSION_SECRET`, and `DATA_ENCRYPTION_KEY` in the stack environment before deployment. Generate each separately with `openssl rand -hex 32`. See the [deployment guide](docs/deployment.md).
+
+To scan a folder on the Docker host, set `STORAGE_SCAN_PATH` to its absolute host path before deploying. Sentinel mounts it read-only at `/scan`; targets entered in the UI are relative to that mount. Keep the default `./storage-scan` if storage analysis is not needed yet.
 
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
 

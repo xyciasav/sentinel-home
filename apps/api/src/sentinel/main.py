@@ -17,6 +17,7 @@ from sentinel.monitoring import monitoring_loop
 from sentinel.notifications import router as notifications_router
 from sentinel.services import router as services_router
 from sentinel.setup import router as setup_router
+from sentinel.storage import router as storage_router
 from sentinel.vulnerabilities import router as vulnerabilities_router
 
 
@@ -41,6 +42,7 @@ app.include_router(incidents_router)
 app.include_router(notifications_router)
 app.include_router(services_router)
 app.include_router(setup_router)
+app.include_router(storage_router)
 app.include_router(vulnerabilities_router)
 web_root = Path("/app/web")
 if web_root.is_dir():
