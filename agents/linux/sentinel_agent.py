@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 def request(url: str, payload: dict, token: str | None = None) -> dict:
@@ -57,7 +57,11 @@ def memory() -> tuple[int, int, int]:
 
 def packages() -> list[dict[str, str | None]]:
     if shutil.which("dpkg-query"):
-        command = ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${Architecture}\n"]
+        command = [
+            "dpkg-query",
+            "-W",
+            "-f=${binary:Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\n",
+        ]
         manager = "dpkg"
     elif shutil.which("rpm"):
         command = ["rpm", "-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n"]
@@ -78,6 +82,14 @@ def packages() -> list[dict[str, str | None]]:
                     "version": parts[1][:255],
                     "architecture": parts[2][:50] if len(parts) > 2 else None,
                     "manager": manager,
+                    "source_name": ((parts[3] if len(parts) > 3 else "") or parts[0]).split(":", 1)[
+                        0
+                    ][:255]
+                    if manager == "dpkg"
+                    else None,
+                    "source_version": (parts[4] or parts[1])[:255]
+                    if manager == "dpkg" and len(parts) > 4
+                    else None,
                 }
             )
     return result

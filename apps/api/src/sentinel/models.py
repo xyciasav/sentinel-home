@@ -246,7 +246,15 @@ class NetworkChange(Base):
 
 class VulnerabilityFinding(Base):
     __tablename__ = "vulnerability_findings"
-    __table_args__ = (Index("ix_vulnerability_address_cve", "address", "cve_id", unique=True),)
+    __table_args__ = (
+        Index(
+            "ix_vulnerability_address_cve_method",
+            "address",
+            "cve_id",
+            "detection_method",
+            unique=True,
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     device_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -264,6 +272,10 @@ class VulnerabilityFinding(Base):
     cpe: Mapped[str] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(30), default="open")
     user_notes: Mapped[str | None] = mapped_column(Text)
+    affected_package: Mapped[str | None] = mapped_column(String(255))
+    installed_version: Mapped[str | None] = mapped_column(String(255))
+    fixed_version: Mapped[str | None] = mapped_column(String(255))
+    detection_method: Mapped[str] = mapped_column(String(50), default="nvd-cpe")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -379,6 +391,8 @@ class InstalledPackage(Base):
     version: Mapped[str] = mapped_column(String(255))
     architecture: Mapped[str | None] = mapped_column(String(50))
     manager: Mapped[str] = mapped_column(String(30))
+    source_name: Mapped[str | None] = mapped_column(String(255))
+    source_version: Mapped[str | None] = mapped_column(String(255))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

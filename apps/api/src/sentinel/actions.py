@@ -29,6 +29,10 @@ class ActionItemView(BaseModel):
     automation_ready: bool
     automation_blocker: str
     priority: int
+    affected_package: str | None
+    installed_version: str | None
+    fixed_version: str | None
+    detection_method: str | None
 
 
 def priority(finding: VulnerabilityFinding, criticality: str | None) -> int:
@@ -68,10 +72,17 @@ async def list_actions(
             device_criticality=device.criticality if device else None,
             automation_ready=False,
             automation_blocker=(
-                "Install the Linux agent and collect the exact package, installed version, and "
-                "fixed version before a playbook can be approved."
+                "Package evidence is complete. A signed, approval-gated agent command protocol "
+                "must be enabled before a playbook can run."
+                if finding.affected_package and finding.fixed_version
+                else "Install or update the Linux agent and collect the exact package, installed "
+                "version, and fixed version before a playbook can be approved."
             ),
             priority=priority(finding, device.criticality if device else None),
+            affected_package=finding.affected_package,
+            installed_version=finding.installed_version,
+            fixed_version=finding.fixed_version,
+            detection_method=finding.detection_method,
         )
         for finding, device in rows
     ]

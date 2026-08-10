@@ -49,6 +49,8 @@ class PackageInput(BaseModel):
     version: str = Field(min_length=1, max_length=255)
     architecture: str | None = Field(default=None, max_length=50)
     manager: str = Field(min_length=1, max_length=30)
+    source_name: str | None = Field(default=None, max_length=255)
+    source_version: str | None = Field(default=None, max_length=255)
 
 
 class HeartbeatInput(BaseModel):
@@ -102,6 +104,8 @@ class PackageView(BaseModel):
     version: str
     architecture: str | None
     manager: str
+    source_name: str | None
+    source_version: str | None
     observed_at: datetime
 
 

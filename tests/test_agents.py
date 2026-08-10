@@ -9,7 +9,7 @@ def test_linux_agent_postpones_newer_type_annotation_evaluation() -> None:
     source = Path("agents/linux/sentinel_agent.py").read_text(encoding="utf-8")
 
     assert "from __future__ import annotations" in source
-    assert 'VERSION = "0.2.0"' in source
+    assert 'VERSION = "0.3.0"' in source
 
 
 def test_agent_heartbeat_validates_resource_ranges() -> None:
