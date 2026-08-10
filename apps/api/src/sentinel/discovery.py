@@ -1,9 +1,11 @@
 import asyncio
 import ipaddress
 import uuid
+from asyncio.subprocess import PIPE
 from datetime import UTC, datetime
 from typing import Annotated
 
+from defusedxml import ElementTree
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -18,6 +20,7 @@ from sentinel.models import (
     DeviceTrust,
     DiscoveredHost,
     DiscoveryRun,
+    NetworkChange,
     Session,
     User,
 )
@@ -72,6 +75,41 @@ async def probe_host(address: str) -> list[int]:
         except (TimeoutError, OSError):
             pass
     return open_ports
+
+
+async def nmap_ports(address: str) -> dict[int, str | None]:
+    process = await asyncio.create_subprocess_exec(
+        "nmap",
+        "-sT",
+        "-Pn",
+        "--top-ports",
+        "100",
+        "--open",
+        "-T3",
+        "--max-retries",
+        "1",
+        "--host-timeout",
+        "30s",
+        "-oX",
+        "-",
+        address,
+        stdout=PIPE,
+        stderr=PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=35)
+    if process.returncode != 0 or len(stdout) > 2_000_000:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Nmap failed: {stderr.decode(errors='replace')[:200]}"
+        )
+    root = ElementTree.fromstring(stdout)
+    ports = {}
+    for item in root.findall("./host/ports/port"):
+        state = item.find("state")
+        if state is None or state.get("state") != "open":
+            continue
+        service = item.find("service")
+        ports[int(item.get("portid", "0"))] = service.get("name") if service is not None else None
+    return ports
 
 
 def validated_subnet(value: str) -> ipaddress.IPv4Network:
@@ -190,4 +228,50 @@ async def add_discovered_host(
             )
         )
         await database.commit()
+    return host_view(host)
+
+
+@router.post("/hosts/{host_id}/inspect", response_model=HostView)
+async def inspect_discovered_host(
+    host_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    authenticated: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> HostView:
+    host = await database.get(DiscoveredHost, host_id)
+    if host is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "discovered host not found")
+    address = ipaddress.ip_address(host.address)
+    if not address.is_private:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "inspection target must be private"
+        )
+    previous = {int(port) for port in host.open_ports.split(",") if port}
+    observed = await nmap_ports(host.address)
+    current = set(observed)
+    for port in sorted(current - previous):
+        database.add(
+            NetworkChange(
+                device_id=host.device_id,
+                address=host.address,
+                kind="port_opened",
+                port=port,
+                service=observed[port],
+            )
+        )
+    for port in sorted(previous - current):
+        database.add(
+            NetworkChange(
+                device_id=host.device_id, address=host.address, kind="port_closed", port=port
+            )
+        )
+    host.open_ports = ",".join(map(str, sorted(current)))
+    database.add(
+        AuditEvent(
+            actor_user_id=authenticated[0].id,
+            action="discovery.inspect_ports",
+            target_type="host",
+            target_id=host.address,
+        )
+    )
+    await database.commit()
     return host_view(host)

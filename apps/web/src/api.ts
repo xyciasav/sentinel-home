@@ -85,6 +85,8 @@ export const api = {
     request<DiscoveryRun>("/api/v1/discovery/runs", { method:"POST", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify({subnet}) }),
   addDiscoveredHost: (id:string, csrfToken:string) =>
     request<DiscoveredHost>(`/api/v1/discovery/hosts/${id}/add`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
+  inspectDiscoveredHost: (id:string, csrfToken:string) =>
+    request<DiscoveredHost>(`/api/v1/discovery/hosts/${id}/inspect`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

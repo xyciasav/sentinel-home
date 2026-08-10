@@ -217,6 +217,21 @@ class DiscoveredHost(Base):
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class NetworkChange(Base):
+    __tablename__ = "network_changes"
+    __table_args__ = (Index("ix_network_changes_detected_at", "detected_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL"), index=True
+    )
+    address: Mapped[str] = mapped_column(String(45))
+    kind: Mapped[str] = mapped_column(String(30))
+    port: Mapped[int] = mapped_column(Integer)
+    service: Mapped[str | None] = mapped_column(String(100))
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

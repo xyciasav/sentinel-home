@@ -9,6 +9,7 @@ RUN npm run build
 FROM python:3.13-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
+RUN apt-get update && apt-get install -y --no-install-recommends nmap && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 WORKDIR /app
 COPY pyproject.toml README.md ./
