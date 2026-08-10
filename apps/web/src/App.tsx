@@ -54,7 +54,7 @@ export function App() {
     <aside>
       <Brand />
       <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button>{["Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
-      <div className="sidebar-bottom"><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
+      <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
     <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
