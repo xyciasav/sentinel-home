@@ -1,6 +1,6 @@
 import pytest
 from fastapi import HTTPException
-from sentinel.discovery import validated_subnet
+from sentinel.discovery import normalize_cpe, validated_subnet
 
 
 def test_discovery_accepts_private_slash_24() -> None:
@@ -12,3 +12,9 @@ def test_discovery_accepts_private_slash_24() -> None:
 def test_discovery_rejects_unsafe_subnets(subnet: str) -> None:
     with pytest.raises(HTTPException):
         validated_subnet(subnet)
+
+
+def test_legacy_nmap_cpe_is_normalized_for_nvd() -> None:
+    assert normalize_cpe("cpe:/a:openbsd:openssh:9.0") == (
+        "cpe:2.3:a:openbsd:openssh:9.0:*:*:*:*:*:*:*"
+    )

@@ -19,6 +19,7 @@ export type Notification = {id:string;incident_id:string|null;kind:string;recipi
 export type DiscoveredHost = {id:string;address:string;open_ports:number[];state:string;device_id:string|null;discovered_at:string};
 export type DiscoveryRun = {id:string;subnet:string;status:string;hosts_checked:number;hosts_found:number;started_at:string;completed_at:string|null;hosts:DiscoveredHost[]};
 export type NetworkChange = {id:string;device_id:string|null;address:string;kind:string;port:number;service:string|null;detected_at:string};
+export type VulnerabilityFinding = {id:string;device_id:string|null;address:string;cve_id:string;title:string;description:string;severity:string;cvss_score:string|null;cpe:string;status:string;first_seen_at:string;last_seen_at:string};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
@@ -89,6 +90,8 @@ export const api = {
   inspectDiscoveredHost: (id:string, csrfToken:string) =>
     request<DiscoveredHost>(`/api/v1/discovery/hosts/${id}/inspect`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   networkChanges: () => request<NetworkChange[]>("/api/v1/discovery/changes"),
+  vulnerabilities: () => request<VulnerabilityFinding[]>("/api/v1/vulnerabilities"),
+  scanHostVulnerabilities: (id:string, csrfToken:string) => request<VulnerabilityFinding[]>(`/api/v1/vulnerabilities/hosts/${id}/scan`, {method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

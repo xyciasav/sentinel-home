@@ -210,6 +210,7 @@ class DiscoveredHost(Base):
     )
     address: Mapped[str] = mapped_column(String(45))
     open_ports: Mapped[str] = mapped_column(String(200))
+    service_evidence: Mapped[str] = mapped_column(Text, default="[]")
     state: Mapped[str] = mapped_column(String(20), default="new")
     device_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("devices.id", ondelete="SET NULL")
@@ -230,6 +231,26 @@ class NetworkChange(Base):
     port: Mapped[int] = mapped_column(Integer)
     service: Mapped[str | None] = mapped_column(String(100))
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class VulnerabilityFinding(Base):
+    __tablename__ = "vulnerability_findings"
+    __table_args__ = (Index("ix_vulnerability_address_cve", "address", "cve_id", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL"), index=True
+    )
+    address: Mapped[str] = mapped_column(String(45))
+    cve_id: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20))
+    cvss_score: Mapped[str | None] = mapped_column(String(10))
+    cpe: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(30), default="open")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class Agent(Base):

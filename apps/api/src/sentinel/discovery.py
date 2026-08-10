@@ -1,5 +1,6 @@
 import asyncio
 import ipaddress
+import json
 import uuid
 from asyncio.subprocess import PIPE
 from datetime import UTC, datetime
@@ -29,6 +30,19 @@ router = APIRouter(prefix="/api/v1/discovery", tags=["network discovery"])
 SAFE_PORTS = (22, 53, 80, 443, 445, 3389, 8080, 8123)
 
 
+def normalize_cpe(value: str | None) -> str | None:
+    if not value:
+        return None
+    if value.startswith("cpe:2.3:"):
+        return value
+    if not value.startswith("cpe:/"):
+        return None
+    parts = value[5:].split(":")
+    if len(parts) < 4 or any(not part for part in parts[:4]):
+        return None
+    return "cpe:2.3:" + ":".join((parts + ["*"] * 11)[:11])
+
+
 class DiscoveryInput(BaseModel):
     subnet: str = Field(max_length=50)
 
@@ -40,6 +54,7 @@ class HostView(BaseModel):
     state: str
     device_id: uuid.UUID | None
     discovered_at: datetime
+    services: list[dict[str, str | int | None]]
 
 
 class RunView(BaseModel):
@@ -71,6 +86,7 @@ def host_view(host: DiscoveredHost) -> HostView:
         state=host.state,
         device_id=host.device_id,
         discovered_at=host.discovered_at,
+        services=json.loads(host.service_evidence or "[]"),
     )
 
 
@@ -87,7 +103,7 @@ async def probe_host(address: str) -> list[int]:
     return open_ports
 
 
-async def nmap_ports(address: str) -> dict[int, str | None]:
+async def nmap_ports(address: str) -> dict[int, dict[str, str | int | None]]:
     process = await asyncio.create_subprocess_exec(
         "nmap",
         "-sT",
@@ -114,25 +130,20 @@ async def nmap_ports(address: str) -> dict[int, str | None]:
             status.HTTP_502_BAD_GATEWAY, f"Nmap failed: {stderr.decode(errors='replace')[:200]}"
         )
     root = ElementTree.fromstring(stdout)
-    ports = {}
+    ports: dict[int, dict[str, str | int | None]] = {}
     for item in root.findall("./host/ports/port"):
         state = item.find("state")
         if state is None or state.get("state") != "open":
             continue
         service = item.find("service")
-        if service is None:
-            label = None
-        else:
-            label = " ".join(
-                value
-                for value in (
-                    service.get("name"),
-                    service.get("product"),
-                    service.get("version"),
-                )
-                if value
-            )[:100]
-        ports[int(item.get("portid", "0"))] = label
+        port = int(item.get("portid", "0"))
+        ports[port] = {
+            "port": port,
+            "service": service.get("name") if service is not None else None,
+            "product": service.get("product") if service is not None else None,
+            "version": service.get("version") if service is not None else None,
+            "cpe": normalize_cpe(service.findtext("cpe") if service is not None else None),
+        }
     return ports
 
 
@@ -279,7 +290,7 @@ async def inspect_discovered_host(
                 address=host.address,
                 kind="port_opened",
                 port=port,
-                service=observed[port],
+                service=str(observed[port].get("service") or "")[:100] or None,
             )
         )
     for port in sorted(previous - current):
@@ -289,6 +300,7 @@ async def inspect_discovered_host(
             )
         )
     host.open_ports = ",".join(map(str, sorted(current)))
+    host.service_evidence = json.dumps(list(observed.values()))
     database.add(
         AuditEvent(
             actor_user_id=authenticated[0].id,

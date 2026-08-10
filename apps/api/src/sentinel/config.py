@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     sentinel_environment: Literal["development", "test", "production"] = "development"
-    sentinel_version: str = "0.12.0"
+    sentinel_version: str = "0.13.0"
     database_url: str | None = None
     redis_url: str | None = None
     session_secret: SecretStr | None = None
@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = None
     alert_from_email: str | None = None
     alert_to_email: str | None = None
+    nvd_api_key: SecretStr | None = None
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     @property
