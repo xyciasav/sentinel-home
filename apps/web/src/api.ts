@@ -22,6 +22,9 @@ export type NetworkChange = {id:string;device_id:string|null;address:string;kind
 export type VulnerabilityFinding = {id:string;device_id:string|null;address:string;cve_id:string;title:string;description:string;severity:string;cvss_score:string|null;known_exploited:boolean;required_action:string|null;action_due:string|null;cpe:string;status:string;user_notes:string|null;first_seen_at:string;last_seen_at:string};
 export type StorageFinding = {id:string;relative_path:string;item_type:string;size_bytes:number;modified_at:string;reason:string;protected:boolean};
 export type StorageTarget = {id:string;name:string;relative_path:string;large_file_bytes:number;old_file_days:number;protected_paths:string;last_scanned_at:string|null;last_total_bytes:number;last_file_count:number;findings:StorageFinding[]};
+export type ReportWindow = {checks:number;successful:number;uptime_percent:number|null;average_response_ms:number|null};
+export type ServiceReport = {id:string;name:string;status:string;checks:number;uptime_percent:number|null;average_response_ms:number|null};
+export type OverviewReport = {generated_at:string;last_24_hours:ReportWindow;last_7_days:ReportWindow;services:ServiceReport[];open_incidents:number;incidents_7_days:number;network_changes_7_days:number;active_vulnerabilities:Record<string,number>;known_exploited:number;storage_recommendations:number;storage_flagged_bytes:number};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
@@ -99,6 +102,7 @@ export const api = {
   createStorageTarget: (payload:Record<string,unknown>,csrfToken:string) => request<StorageTarget>("/api/v1/storage/targets",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify(payload)}),
   scanStorageTarget: (id:string,csrfToken:string) => request<StorageTarget>(`/api/v1/storage/targets/${id}/scan`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
   deleteStorageTarget: (id:string,csrfToken:string) => request<void>(`/api/v1/storage/targets/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":csrfToken}}),
+  overviewReport: () => request<OverviewReport>("/api/v1/reports/overview"),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };
