@@ -28,6 +28,8 @@ For Portainer, set `POSTGRES_PASSWORD`, `SESSION_SECRET`, and `DATA_ENCRYPTION_K
 
 To scan a folder on the Docker host, set `STORAGE_SCAN_PATH` to its absolute host path before deploying. Sentinel mounts it read-only at `/scan`; targets entered in the UI are relative to that mount. Keep the default `./storage-scan` if storage analysis is not needed yet.
 
+Do not mount the Docker host's filesystem root. Mount only the folders you intend Sentinel to inventory. For storage on another device, first mount that SMB/NFS share on the Docker host, then use that local mount point as `STORAGE_SCAN_PATH`; Sentinel does not accept a remote IP or share URL directly.
+
 The default Compose binding is loopback-only. To make the service available on a trusted LAN, explicitly set `BIND_ADDRESS` to the server's LAN address.
 
 Opening the server's root URL loads the Sentinel web interface. Interactive API documentation remains available at `/docs`.
