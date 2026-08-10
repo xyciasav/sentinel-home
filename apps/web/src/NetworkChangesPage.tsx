@@ -1,0 +1,5 @@
+import { NetworkChange } from "./api";
+
+export function NetworkChangesPage({changes}:{changes:NetworkChange[]}){
+  return <><header><div><p className="eyebrow">OBSERVED EXPOSURE</p><h1>Network changes</h1><p>Ports that appeared or disappeared during manual inspections.</p></div></header>{changes.length===0?<div className="empty-state panel"><div>◎</div><h2>No port changes recorded</h2><p>Inspect a discovered host twice to establish a baseline and detect later changes.</p></div>:<div className="device-list panel"><div className="change-row heading"><span>Change</span><span>Host</span><span>Service evidence</span><span>Detected</span></div>{changes.map(change=><div className="change-row" key={change.id}><span><i className={`status-dot ${change.kind==="port_opened"?"down":"paused"}`}/><b>{change.kind==="port_opened"?"Port opened":"Port closed"}</b></span><span>{change.address}:{change.port}</span><span>{change.service||"Unknown service"}</span><span>{new Date(change.detected_at).toLocaleString()}</span></div>)}</div>}</>;
+}

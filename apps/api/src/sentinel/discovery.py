@@ -53,6 +53,16 @@ class RunView(BaseModel):
     hosts: list[HostView]
 
 
+class ChangeView(BaseModel):
+    id: uuid.UUID
+    device_id: uuid.UUID | None
+    address: str
+    kind: str
+    port: int
+    service: str | None
+    detected_at: datetime
+
+
 def host_view(host: DiscoveredHost) -> HostView:
     return HostView(
         id=host.id,
@@ -81,6 +91,8 @@ async def nmap_ports(address: str) -> dict[int, str | None]:
     process = await asyncio.create_subprocess_exec(
         "nmap",
         "-sT",
+        "-sV",
+        "--version-light",
         "-Pn",
         "--top-ports",
         "100",
@@ -108,7 +120,19 @@ async def nmap_ports(address: str) -> dict[int, str | None]:
         if state is None or state.get("state") != "open":
             continue
         service = item.find("service")
-        ports[int(item.get("portid", "0"))] = service.get("name") if service is not None else None
+        if service is None:
+            label = None
+        else:
+            label = " ".join(
+                value
+                for value in (
+                    service.get("name"),
+                    service.get("product"),
+                    service.get("version"),
+                )
+                if value
+            )[:100]
+        ports[int(item.get("portid", "0"))] = label
     return ports
 
 
@@ -275,3 +299,15 @@ async def inspect_discovered_host(
     )
     await database.commit()
     return host_view(host)
+
+
+@router.get("/changes", response_model=list[ChangeView])
+async def list_network_changes(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _authenticated: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[NetworkChange]:
+    return list(
+        await database.scalars(
+            select(NetworkChange).order_by(NetworkChange.detected_at.desc()).limit(200)
+        )
+    )
