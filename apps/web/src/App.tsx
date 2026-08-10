@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, Device, ServiceMonitor, User } from "./api";
+import { api, Device, Incident, ServiceMonitor, User } from "./api";
 import { DevicesPage } from "./DevicesPage";
-import { logicalServices, ServicesPage } from "./ServicesPage";
+import { ServicesPage } from "./ServicesPage";
+import { IncidentsPage } from "./IncidentsPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -11,14 +12,15 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
-  const [page, setPage] = useState<"overview" | "devices" | "services">("overview");
+  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents">("overview");
   const [devices, setDevices] = useState<Device[]>([]);
   const [monitors, setMonitors] = useState<ServiceMonitor[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
     if (view !== "dashboard") return;
-    const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); }, 10000);
+    const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); void loadIncidents(); }, 10000);
     return () => window.clearInterval(timer);
   }, [view]);
 
@@ -29,7 +31,7 @@ export function App() {
       try {
         const currentUser = await api.me();
         const token = await api.csrf();
-        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors();
+        setUser(currentUser); setCsrf(token.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents();
       } catch { setView("login"); }
     } catch { setView("login"); }
   }
@@ -41,9 +43,10 @@ export function App() {
 
   async function loadDevices() { setDevices(await api.devices()); }
   async function loadMonitors() { setMonitors(await api.monitors()); }
+  async function loadIncidents() { setIncidents(await api.incidents()); }
 
   function authenticated(result: { user: User; csrf_token: string }) {
-    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors();
+    setUser(result.user); setCsrf(result.csrf_token); setView("dashboard"); void loadStatus(); void loadDevices(); void loadMonitors(); void loadIncidents();
   }
 
   if (view === "loading") return <div className="center-screen"><div className="loader" /><p>Starting Sentinel…</p></div>;
@@ -53,15 +56,15 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button>{["Incidents","Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button>{["Vulnerabilities","Containers","Storage"].map(item => <button key={item} disabled>{item}<span>Soon</span></button>)}</nav>
       <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : <>
+    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
         <StatusCard label="Devices" value={String(devices.length)} detail={devices.length ? `${devices.filter(device=>device.status==="online").length} currently online` : "No devices enrolled yet"} />
-        <StatusCard label="Services down" value={String(countServicesDown(monitors))} detail={`${logicalServiceCount(monitors)} logical service${logicalServiceCount(monitors)===1?"":"s"} monitored`} />
+        <StatusCard label="Active incidents" value={String(incidents.filter(i=>i.status==="open").length)} detail={incidents.some(i=>i.status==="open")?"Investigation may be needed":"Nothing needs attention"} />
         <StatusCard label="Version" value={version} detail="Phase 2 foundation" />
       </section>
       <section className="content-grid">
@@ -82,5 +85,3 @@ function AuthScreen({mode,onSuccess}:{mode:"setup"|"login";onSuccess:(result:{us
 
 function StatusCard({label,value,detail,tone}:{label:string;value:string;detail:string;tone?:string}){return <article className="status-card"><p>{label}</p><strong className={tone}>{value}</strong><small>{detail}</small></article>}
 function Step({title,text,done,active}:{title:string;text:string;done?:boolean;active?:boolean}){return <div className={`step ${active?"active":""}`}><span>{done?"✓":""}</span><div><b>{title}</b><p>{text}</p></div></div>}
-function logicalServiceCount(monitors:ServiceMonitor[]){const grouped=new Set(monitors.map(m=>m.group_name).filter(Boolean));return grouped.size+monitors.filter(m=>!m.group_name).length}
-function countServicesDown(monitors:ServiceMonitor[]){return logicalServices(monitors).filter(group=>group.status==="down").length+monitors.filter(m=>!m.group_name&&m.status==="down").length}

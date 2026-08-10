@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from sentinel.database import get_session_factory
+from sentinel.incidents import record_monitor_transition
 from sentinel.models import Device, MonitorResult, ServiceMonitor
 
 logger = logging.getLogger(__name__)
@@ -140,13 +141,11 @@ async def monitor_all_services() -> None:
         monitors = list(
             await database.scalars(select(ServiceMonitor).where(ServiceMonitor.enabled.is_(True)))
         )
-        semaphore = asyncio.Semaphore(10)
-
-        async def limited_check(monitor: ServiceMonitor) -> None:
-            async with semaphore:
-                database.add(await check_service(monitor))
-
-        await asyncio.gather(*(limited_check(monitor) for monitor in monitors))
+        for monitor in monitors:
+            previous_status = monitor.status
+            result = await check_service(monitor)
+            database.add(result)
+            await record_monitor_transition(database, monitor, previous_status, result.checked_at)
         await database.commit()
 
 

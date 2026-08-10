@@ -13,6 +13,8 @@ export type ServiceMonitor = {
   outage_started_at:string|null; last_response_ms:number|null; last_status_code:number|null;
   last_failure_reason:string|null;
 };
+export type IncidentEvent = {kind:string;message:string;occurred_at:string};
+export type Incident = {id:string;monitor_id:string;title:string;severity:string;status:string;summary:string;started_at:string;recovered_at:string|null;acknowledged_at:string|null;events:IncidentEvent[]};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
@@ -69,6 +71,9 @@ export const api = {
     request<ServiceMonitor>(`/api/v1/monitors/${id}/check`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   deleteMonitor: (id:string, csrfToken:string) =>
     request<void>(`/api/v1/monitors/${id}`, { method:"DELETE", headers:{"X-CSRF-Token":csrfToken} }),
+  incidents: () => request<Incident[]>("/api/v1/incidents"),
+  acknowledgeIncident: (id:string, csrfToken:string) =>
+    request<Incident>(`/api/v1/incidents/${id}/acknowledge`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   health: () => request<{ status: string; dependencies: Record<string, { status: string }> }>("/api/v1/health/ready"),
   version: () => request<{ version: string; environment: string }>("/api/v1/version")
 };

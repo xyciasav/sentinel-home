@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.database import get_session
+from sentinel.incidents import record_monitor_transition
 from sentinel.models import AuditEvent, ServiceMonitor, Session, User
 from sentinel.monitoring import check_service
 
@@ -80,7 +81,10 @@ async def save_monitor(
     database.add(monitor)
     await database.flush()
     if monitor.enabled:
-        database.add(await check_service(monitor))
+        previous_status = monitor.status
+        result = await check_service(monitor)
+        database.add(result)
+        await record_monitor_transition(database, monitor, previous_status, result.checked_at)
     else:
         monitor.status = "paused"
     database.add(
@@ -125,7 +129,10 @@ async def check_monitor_now(
     monitor = await database.get(ServiceMonitor, monitor_id)
     if monitor is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "service monitor not found")
-    database.add(await check_service(monitor))
+    previous_status = monitor.status
+    result = await check_service(monitor)
+    database.add(result)
+    await record_monitor_transition(database, monitor, previous_status, result.checked_at)
     await database.commit()
     return monitor_view(monitor)
 

@@ -1,0 +1,9 @@
+import { useState } from "react";
+import { api, Incident } from "./api";
+
+export function IncidentsPage({incidents,csrf,refresh}:{incidents:Incident[];csrf:string;refresh:()=>Promise<void>}){
+  const [expanded,setExpanded]=useState<string|null>(null);
+  const active=incidents.filter(item=>item.status==="open").length;
+  return <><header><div><p className="eyebrow">OUTAGE DIAGNOSIS</p><h1>Incidents</h1><p>{active?`${active} active incident${active===1?"":"s"} need attention.`:"No active outages need attention."}</p></div><div className={`live ${active?"incident-live":""}`}><i/> {active?`${active} active`:"All clear"}</div></header>
+  {incidents.length===0?<div className="empty-state panel"><div>✓</div><h2>No incidents recorded</h2><p>A timeline will appear here when a monitored service goes down.</p></div>:<div className="incident-list">{incidents.map(item=><article className={`panel incident-card ${item.status}`} key={item.id}><div className="incident-summary" onClick={()=>setExpanded(expanded===item.id?null:item.id)}><span><i className={`status-dot ${item.status==="open"?"down":"up"}`}/></span><div><p className="eyebrow">{item.severity.toUpperCase()} · {item.status.toUpperCase()}</p><h2>{item.title}</h2><p>{item.summary}</p></div><div className="incident-meta"><b>{new Date(item.started_at).toLocaleString()}</b><small>{item.acknowledged_at?"Acknowledged":"Not acknowledged"}</small></div><button>{expanded===item.id?"Hide":"Timeline"}</button></div>{expanded===item.id&&<div className="timeline">{item.events.map((event,index)=><div className="timeline-event" key={`${event.occurred_at}-${index}`}><i/><div><b>{event.kind}</b><p>{event.message}</p><small>{new Date(event.occurred_at).toLocaleString()}</small></div></div>)}{!item.acknowledged_at&&<button className="primary compact" onClick={async()=>{await api.acknowledgeIncident(item.id,csrf);await refresh()}}>Acknowledge incident</button>}</div>}</article>)}</div>}</>;
+}
