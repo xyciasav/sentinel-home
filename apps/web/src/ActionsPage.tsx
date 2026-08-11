@@ -15,6 +15,7 @@ export function ActionsPage({
   const [localItems, setLocalItems] = useState(items);
   const [busy, setBusy] = useState("");
   const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "release" | "dismiss" | "">("");
+  const [bulkProgress, setBulkProgress] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -176,20 +177,36 @@ export function ActionsPage({
       `Dismiss ${selectedDismissible.length} findings as accepted risk for now? They will leave the active Action Center but remain in vulnerability history.`
     )) return;
     setBulkBusy("dismiss");
+    setErrors(current => {
+      const next = {...current};
+      delete next.bulk;
+      selectedDismissible.forEach(item => delete next[item.finding_id]);
+      return next;
+    });
     try {
       const ids = selectedDismissible.map(item => item.finding_id);
-      await api.dismissActions(ids, csrf);
-      setLocalItems(current => current.filter(item => !ids.includes(item.finding_id)));
-      setSelected(new Set());
+      for (let offset = 0; offset < ids.length; offset += 400) {
+        const batch = ids.slice(offset, offset + 400);
+        setBulkProgress(`${offset + 1}–${Math.min(offset + batch.length, ids.length)} of ${ids.length}`);
+        await api.dismissActions(batch, csrf);
+        const completed = new Set(batch);
+        setLocalItems(current => current.filter(item => !completed.has(item.finding_id)));
+        setSelected(current => {
+          const next = new Set(current);
+          batch.forEach(id => next.delete(id));
+          return next;
+        });
+      }
       void refresh();
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Unable to dismiss findings";
       setErrors(current => ({
         ...current,
-        ...Object.fromEntries(selectedDismissible.map(item => [item.finding_id, message]))
+        bulk: message
       }));
     } finally {
       setBulkBusy("");
+      setBulkProgress("");
     }
   }
 
@@ -253,8 +270,9 @@ export function ActionsPage({
       <button className="bulk-primary" onClick={() => void buildSelected()} disabled={!selectedBuildable.length || !!bulkBusy}>{bulkBusy === "build" ? "Building…" : `Build selected (${selectedBuildable.length})`}</button>
       <button className="bulk-primary" onClick={() => void approveSelected()} disabled={!selectedDrafts.length || !!bulkBusy}>{bulkBusy === "approve" ? "Approving…" : `Approve selected (${selectedDrafts.length})`}</button>
       <button className="bulk-danger" onClick={() => void releaseSelected()} disabled={!selectedApproved.length || !!bulkBusy}>{bulkBusy === "release" ? "Releasing…" : `Run selected (${selectedApproved.length})`}</button>
-      <button className="secondary-action" onClick={() => void dismissSelected()} disabled={!selectedDismissible.length || !!bulkBusy}>{bulkBusy === "dismiss" ? "Dismissing…" : `Dismiss selected (${selectedDismissible.length})`}</button>
+      <button className="secondary-action" onClick={() => void dismissSelected()} disabled={!selectedDismissible.length || !!bulkBusy}>{bulkBusy === "dismiss" ? `Dismissing ${bulkProgress || "…"}` : `Dismiss selected (${selectedDismissible.length})`}</button>
     </div>
+    {errors.bulk && <div className="error storage-error">{errors.bulk}</div>}
     {localItems.length === 0
       ? <div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>
       : visible.length === 0
