@@ -27,6 +27,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Multi-select package findings for bulk playbook creation and approval
 - HMAC-authenticated Linux package execution with explicit release and result reporting
 - Remediation queue summaries with cancel, retry, and archive lifecycle controls
+- Security operations reporting with agent coverage, remediation outcomes, and device risk
 
 ## Quick start
 
