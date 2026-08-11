@@ -16,6 +16,7 @@ import { SourcesPage } from "./SourcesPage";
 import { NetworkPage } from "./NetworkPage";
 import { MaintenancePage } from "./MaintenancePage";
 import { ApplicationsPage } from "./ApplicationsPage";
+import { OverviewPage } from "./OverviewPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 type Page = "overview" | "devices" | "agents" | "containers" | "network" | "sources" | "discovery" | "changes" | "storage" | "services" | "applications" | "incidents" | "notifications" | "maintenance" | "vulnerabilities" | "actions" | "reports";
@@ -113,16 +114,7 @@ export function App() {
     </aside>
     <main><WorkspaceNav page={page} setPage={setPage} loadAgents={loadAgents} loadContainers={loadContainers} loadNetwork={loadNetwork} loadStorage={loadStorage} loadFindings={loadFindings} loadActions={loadActions} loadReport={loadReport} loadApplications={loadApplications}/>{page==="applications" ? <ApplicationsPage items={applications} csrf={csrf} refresh={loadApplications}/> : page==="maintenance" ? <MaintenancePage windows={maintenance} devices={devices} monitors={monitors} csrf={csrf} refresh={loadMaintenance}/> : page==="network" ? <NetworkPage sources={sources} run={discovery} changes={changes} csrf={csrf} refreshSources={loadSources} refreshDiscovery={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="sources" ? <SourcesPage sources={sources} csrf={csrf} refresh={loadSources} refreshDevices={loadDevices}/> : page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
-      <section className="status-grid">
-        <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
-        <StatusCard label="Devices" value={String(devices.length)} detail={devices.length ? `${devices.filter(device=>device.status==="online").length} currently online` : "No devices enrolled yet"} />
-        <StatusCard label="Active incidents" value={String(incidents.filter(i=>i.status==="open").length)} detail={incidents.some(i=>i.status==="open")?"Investigation may be needed":"Nothing needs attention"} />
-        <StatusCard label="Version" value={version} detail="Phase 2 foundation" />
-      </section>
-      <section className="content-grid">
-        <article className="panel getting-started"><div className="panel-title"><div><p className="eyebrow">GETTING STARTED</p><h2>Build your home inventory</h2></div><span>{2+(monitors.length?1:0)} of 4</span></div><Step done title="Deploy Sentinel Home" text="Core services are healthy and persistent."/><Step done={devices.length>0} active={devices.length===0} title="Add your first device" text="Track systems on your private network."/><Step title="Install an endpoint agent" text="Linux and Windows agent enrollment follows inventory."/><Step done={monitors.length>0} active={devices.length>0&&monitors.length===0} title="Create a service monitor" text="Track local HTTP and HTTPS availability."/></article>
-        <article className="panel posture"><p className="eyebrow">SECURITY POSTURE</p><h2>Protected by default</h2><ul><li><b>Administrator</b><span>Configured</span></li><li><b>Session security</b><span>Active</span></li><li><b>Network exposure</b><span>LAN only</span></li><li><b>Automated remediation</b><span>Disabled</span></li></ul><p className="quiet">No changes will be made to remote systems without explicit future opt-in.</p></article>
-      </section>
+      <OverviewPage username={user?.username||"admin"} version={version} health={health}/>
     </>}</main>
   </div>;
 }

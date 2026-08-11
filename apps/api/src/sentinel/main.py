@@ -14,6 +14,7 @@ from sentinel.applications import router as applications_router
 from sentinel.auth import router as auth_router
 from sentinel.config import get_settings
 from sentinel.containers import router as containers_router
+from sentinel.dashboard import router as dashboard_router
 from sentinel.devices import router as devices_router
 from sentinel.discovery import router as discovery_router
 from sentinel.health import database_status, redis_status
@@ -61,6 +62,7 @@ app.include_router(applications_router)
 app.include_router(agents_router)
 app.include_router(auth_router)
 app.include_router(containers_router)
+app.include_router(dashboard_router)
 app.include_router(devices_router)
 app.include_router(discovery_router)
 app.include_router(incidents_router)

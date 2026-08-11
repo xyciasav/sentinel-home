@@ -36,6 +36,8 @@ export type HistoricalReport = {generated_at:string;days:number;start_at:string;
 export type ApplicationSnapshot = {version:string|null;queue_count:number;failed_count:number;item_count:number;active_count:number;disk_free_bytes:number|null;collected_at:string};
 export type ApplicationIntegration = {id:string;name:string;kind:"sonarr"|"radarr"|"prowlarr"|"sabnzbd"|"plex"|"qbittorrent";base_url:string;enabled:boolean;last_sync_at:string|null;last_sync_status:string;last_sync_error:string|null;latest:ApplicationSnapshot|null;history:ApplicationSnapshot[]};
 export type ApplicationEvent = {id:string;integration_id:string;application_name:string;application_kind:string;kind:string;severity:string;message:string;acknowledged_at:string|null;occurred_at:string};
+export type AttentionItem = {source:string;severity:string;title:string;detail:string;occurred_at:string;acknowledged:boolean};
+export type Dashboard = {generated_at:string;devices_total:number;devices_online:number;appliance_devices:number;services_total:number;services_up:number;open_incidents:number;agents_expected:number;agents_connected:number;applications_total:number;applications_healthy:number;vulnerabilities_active:number;vulnerabilities_critical_high:number;known_exploited:number;network_alerts_open:number;container_alerts_open:number;application_alerts_open:number;attention:AttentionItem[]};
 export type RemediationPlan = {id:string;finding_id:string;agent_id:string;package_name:string;installed_version:string;target_version:string;operation:string;status:"draft"|"approved"|"queued"|"dispatched"|"completed"|"failed"|"canceled"|"archived";created_at:string;approved_at:string|null;dispatched_at:string|null;completed_at:string|null;result_output:string|null;result_error:string|null};
 export type ActionItem = {finding_id:string;cve_id:string;title:string;severity:string;cvss_score:string|null;known_exploited:boolean;required_action:string|null;action_due:string|null;finding_status:string;address:string;device_name:string|null;device_criticality:string|null;automation_ready:boolean;automation_blocker:string;priority:number;affected_package:string|null;installed_version:string|null;fixed_version:string|null;detection_method:string|null;plan:RemediationPlan|null};
 export type Agent = {id:string;device_id:string;device_name:string;version:string;executor_version:string|null;platform:string;hostname:string|null;os_name:string|null;os_version:string|null;kernel_version:string|null;last_heartbeat_at:string|null;connected:boolean;cpu_percent:number|null;memory_percent:number|null;disk_percent:number|null;disk_free_bytes:number|null;uptime_seconds:number|null;package_count:number;container_count:number};
@@ -92,6 +94,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  dashboard: () => request<Dashboard>("/api/v1/dashboard"),
   setupStatus: () => request<{ initialized: boolean; administrator_count: number }>("/api/v1/setup/status"),
   me: () => request<User>("/api/v1/auth/me"),
   csrf: () => request<{ csrf_token: string }>("/api/v1/auth/csrf"),
