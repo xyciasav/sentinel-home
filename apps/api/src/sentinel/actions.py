@@ -88,7 +88,7 @@ async def list_actions(
             .where(
                 or_(
                     VulnerabilityFinding.status.in_(("open", "investigating")),
-                    RemediationPlan.id.is_not(None),
+                    (RemediationPlan.id.is_not(None)) & (RemediationPlan.status != "archived"),
                 )
             )
         )
@@ -257,3 +257,78 @@ async def release_plan(
     await database.commit()
     await database.refresh(plan)
     return plan
+
+
+async def transition_plan(
+    plan_id: uuid.UUID,
+    allowed: tuple[str, ...],
+    new_status: str,
+    action: str,
+    database: AsyncSession,
+    user: User,
+) -> RemediationPlan:
+    plan = await database.scalar(
+        select(RemediationPlan).where(RemediationPlan.id == plan_id).with_for_update()
+    )
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "remediation plan not found")
+    if plan.status not in allowed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"plan in {plan.status} state cannot transition to {new_status}",
+        )
+    plan.status = new_status
+    if new_status == "queued":
+        plan.dispatched_at = None
+        plan.completed_at = None
+        plan.result_output = None
+        plan.result_error = None
+    database.add(
+        AuditEvent(
+            actor_user_id=user.id,
+            action=action,
+            target_type="remediation_plan",
+            target_id=str(plan.id),
+        )
+    )
+    await database.commit()
+    await database.refresh(plan)
+    return plan
+
+
+@router.post("/plans/{plan_id}/cancel", response_model=RemediationPlanView)
+async def cancel_plan(
+    plan_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> RemediationPlan:
+    return await transition_plan(
+        plan_id, ("approved", "queued"), "canceled", "remediation.plan.cancel", database, auth[0]
+    )
+
+
+@router.post("/plans/{plan_id}/retry", response_model=RemediationPlanView)
+async def retry_plan(
+    plan_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> RemediationPlan:
+    return await transition_plan(
+        plan_id, ("failed",), "queued", "remediation.plan.retry", database, auth[0]
+    )
+
+
+@router.post("/plans/{plan_id}/archive", response_model=RemediationPlanView)
+async def archive_plan(
+    plan_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> RemediationPlan:
+    return await transition_plan(
+        plan_id,
+        ("completed", "failed", "canceled"),
+        "archived",
+        "remediation.plan.archive",
+        database,
+        auth[0],
+    )
