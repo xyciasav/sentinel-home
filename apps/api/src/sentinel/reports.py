@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session
@@ -336,7 +336,13 @@ async def overview_report(
     vulnerability_rows = (
         await database.execute(
             select(VulnerabilityFinding.severity, func.count(VulnerabilityFinding.id))
-            .where(VulnerabilityFinding.status.in_(("open", "investigating")))
+            .where(
+                VulnerabilityFinding.status.in_(("open", "investigating")),
+                or_(
+                    VulnerabilityFinding.severity != "unknown",
+                    VulnerabilityFinding.known_exploited.is_(True),
+                ),
+            )
             .group_by(VulnerabilityFinding.severity)
         )
     ).all()
@@ -360,6 +366,10 @@ async def overview_report(
         active_filter = (
             VulnerabilityFinding.device_id == device.id,
             VulnerabilityFinding.status.in_(("open", "investigating")),
+            or_(
+                VulnerabilityFinding.severity != "unknown",
+                VulnerabilityFinding.known_exploited.is_(True),
+            ),
         )
         device_security.append(
             DeviceSecurityView(

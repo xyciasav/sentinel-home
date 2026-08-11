@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session
@@ -47,6 +47,7 @@ class DashboardView(BaseModel):
     applications_total: int
     applications_healthy: int
     vulnerabilities_active: int
+    vulnerabilities_unscored: int
     vulnerabilities_critical_high: int
     known_exploited: int
     network_alerts_open: int
@@ -127,6 +128,13 @@ async def dashboard(
     ]
     attention.sort(key=lambda item: item.occurred_at, reverse=True)
     active_findings = (VulnerabilityFinding.status.in_(("open", "investigating")),)
+    actionable_findings = (
+        *active_findings,
+        or_(
+            VulnerabilityFinding.severity != "unknown",
+            VulnerabilityFinding.known_exploited.is_(True),
+        ),
+    )
     return DashboardView(
         generated_at=now,
         devices_total=int(await scalar(select(func.count(Device.id))) or 0),
@@ -172,7 +180,18 @@ async def dashboard(
             or 0
         ),
         vulnerabilities_active=int(
-            await scalar(select(func.count(VulnerabilityFinding.id)).where(*active_findings)) or 0
+            await scalar(select(func.count(VulnerabilityFinding.id)).where(*actionable_findings))
+            or 0
+        ),
+        vulnerabilities_unscored=int(
+            await scalar(
+                select(func.count(VulnerabilityFinding.id)).where(
+                    *active_findings,
+                    VulnerabilityFinding.severity == "unknown",
+                    VulnerabilityFinding.known_exploited.is_(False),
+                )
+            )
+            or 0
         ),
         vulnerabilities_critical_high=int(
             await scalar(

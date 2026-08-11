@@ -19,7 +19,7 @@ export function ActionsPage({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [severity, setSeverity] = useState("all");
+  const [severity, setSeverity] = useState("actionable");
   const [device, setDevice] = useState("all");
   const [readiness, setReadiness] = useState("all");
   const [planStatus, setPlanStatus] = useState("all");
@@ -36,7 +36,7 @@ export function ActionsPage({
       const text = `${item.cve_id} ${item.title} ${item.device_name || ""} ${item.address} ${item.affected_package || ""}`.toLowerCase();
       const state = item.plan?.status || (item.automation_ready ? "ready" : "locked");
       return (!query || text.includes(query.toLowerCase()))
-        && (severity === "all" || item.severity === severity)
+        && (severity === "all" || severity === "actionable" && (item.severity !== "unknown" || item.known_exploited) || item.severity === severity)
         && (device === "all" || (item.device_name || item.address) === device)
         && (readiness === "all" || (readiness === "ready") === item.automation_ready)
         && (planStatus === "all" || state === planStatus);
@@ -55,13 +55,14 @@ export function ActionsPage({
     const order = ["Playbook ready", "Manual review", "Playbook history"];
     return [...new Set(visible.map(key))].sort((a,b) => order.indexOf(a)-order.indexOf(b) || a.localeCompare(b)).map(value => [value, visible.filter(item => key(item) === value)] as [string, ActionItem[]]);
   }, [visible, groupBy]);
+  const postureItems = localItems.filter(item => item.severity !== "unknown" || item.known_exploited);
   const summary = useMemo(() => ({
-    ready: localItems.filter(item => item.automation_ready && !item.plan).length,
-    review: localItems.filter(item => item.plan?.status === "draft").length,
-    queued: localItems.filter(item => ["approved", "queued", "dispatched"].includes(item.plan?.status || "")).length,
-    failed: localItems.filter(item => item.plan?.status === "failed").length,
-    completed: localItems.filter(item => item.plan?.status === "completed").length
-    ,manual: localItems.filter(item => !item.automation_ready).length
+    ready: postureItems.filter(item => item.automation_ready && !item.plan).length,
+    review: postureItems.filter(item => item.plan?.status === "draft").length,
+    queued: postureItems.filter(item => ["approved", "queued", "dispatched"].includes(item.plan?.status || "")).length,
+    failed: postureItems.filter(item => item.plan?.status === "failed").length,
+    completed: postureItems.filter(item => item.plan?.status === "completed").length,
+    manual: postureItems.filter(item => !item.automation_ready).length
   }), [localItems]);
 
   function replaceItem(findingId: string, change: Partial<ActionItem>) {
@@ -256,7 +257,7 @@ export function ActionsPage({
     <section className="action-summary"><article><b>{summary.ready}</b><span>Ready to build</span></article><article><b>{summary.manual}</b><span>Manual review</span></article><article><b>{summary.review}</b><span>Awaiting approval</span></article><article><b>{summary.queued}</b><span>Approved / running</span></article><article className={summary.failed?"danger":""}><b>{summary.failed}</b><span>Failed</span></article><article><b>{summary.completed}</b><span>Completed</span></article></section>
     <div className="panel finding-filters action-filters">
       <label>Search<input value={query} onChange={event => setQuery(event.target.value)} placeholder="CVE, package, or device" /></label>
-      <label>Severity<select value={severity} onChange={event => setSeverity(event.target.value)}><option value="all">All</option>{["critical", "high", "medium", "low", "unknown"].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Severity<select value={severity} onChange={event => setSeverity(event.target.value)}><option value="actionable">Actionable</option><option value="all">All including unscored</option>{["critical", "high", "medium", "low", "unknown"].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Device<select value={device} onChange={event => setDevice(event.target.value)}><option value="all">All</option>{devices.map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Readiness<select value={readiness} onChange={event => setReadiness(event.target.value)}><option value="all">All</option><option value="ready">Playbook ready</option><option value="locked">Manual review</option></select></label>
       <label>Plan status<select value={planStatus} onChange={event => setPlanStatus(event.target.value)}><option value="all">All</option><option value="ready">Not built</option><option value="draft">Draft</option><option value="approved">Approved</option><option value="queued">Queued</option><option value="dispatched">Executing</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="canceled">Canceled</option><option value="locked">Locked</option></select></label>
