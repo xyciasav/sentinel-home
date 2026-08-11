@@ -9,17 +9,21 @@ import sys
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.:_-]{0,254}$")
 VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.:~_-]{0,254}$")
-HELPER_VERSION = "0.3.1"
+HELPER_VERSION = "0.3.2"
 
 
 def installed_version(package: str) -> str:
-    return subprocess.run(  # noqa: S603
-        ["/usr/bin/dpkg-query", "-W", "-f=${Version}", package],
+    output = subprocess.run(  # noqa: S603
+        ["/usr/bin/dpkg-query", "-W", "-f=${db:Status-Abbrev}\t${Version}", package],
         capture_output=True,
         text=True,
         timeout=30,
         check=True,
     ).stdout.strip()
+    status, _, version = output.partition("\t")
+    if not status.startswith("ii") or not version:
+        raise ValueError(f"package is not fully installed: {package} ({status.strip()})")
+    return version
 
 
 def run() -> int:

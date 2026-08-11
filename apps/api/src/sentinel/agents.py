@@ -315,7 +315,7 @@ async def next_command(
     database: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[Agent, Depends(authenticated_agent)],
 ) -> CommandView | None:
-    if agent.executor_version != "0.3.1":
+    if agent.executor_version != "0.3.2":
         return None
     retry_before = datetime.now(UTC) - timedelta(minutes=5)
     plan = await database.scalar(

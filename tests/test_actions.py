@@ -21,7 +21,7 @@ def test_stale_executor_blocks_package_automation() -> None:
     finding = SimpleNamespace(detection_method="osv-agent-package")
     agent = SimpleNamespace(executor_version=None)
 
-    assert "required 0.3.1" in automation_blocker(finding, agent)
+    assert "required 0.3.2" in automation_blocker(finding, agent)
 
 
 def test_service_finding_explains_why_it_has_no_playbook() -> None:

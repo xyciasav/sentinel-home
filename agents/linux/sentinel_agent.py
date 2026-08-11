@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 
 
 def request(
@@ -139,7 +139,7 @@ def packages() -> list[dict[str, str | None]]:
         command = [
             "dpkg-query",
             "-W",
-            "-f=${binary:Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\n",
+            "-f=${binary:Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\t${db:Status-Abbrev}\n",
         ]
         manager = "dpkg"
     elif shutil.which("rpm"):
@@ -154,7 +154,7 @@ def packages() -> list[dict[str, str | None]]:
     result = []
     for line in output.splitlines()[:20_000]:
         parts = line.split("\t")
-        if len(parts) >= 2:
+        if len(parts) >= 6 and parts[5].startswith("ii"):
             result.append(
                 {
                     "name": parts[0][:255],
