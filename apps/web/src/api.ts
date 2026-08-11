@@ -5,12 +5,13 @@ export type Device = {
   device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
   last_failure_reason: string | null; notes: string | null;
-  alerts_muted_until: string | null; alert_mute_reason: string | null;
+  alerts_muted_until: string | null; alert_mute_reason: string | null; notifications_muted:boolean;
 };
 export type ServiceMonitor = {
   id:string; name:string; group_name:string|null; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
   expected_text:string|null; timeout_seconds:number; verify_tls:boolean; enabled:boolean;
   severity:string; status:string; last_checked_at:string|null; last_success_at:string|null;
+  notifications_muted:boolean;
   outage_started_at:string|null; last_response_ms:number|null; last_status_code:number|null;
   last_failure_reason:string|null;
 };
@@ -99,6 +100,8 @@ export const api = {
     request<Notification>("/api/v1/notifications/test", { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   dismissNotifications: (ids:string[],csrfToken:string) => request<void>("/api/v1/notifications/dismiss",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({ids})}),
   muteDeviceAlerts: (deviceId:string,minutes:number,reason:string,csrfToken:string) => request<{device_id:string;alerts_muted_until:string|null;alert_mute_reason:string|null}>(`/api/v1/notifications/devices/${deviceId}/mute`,{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({minutes,reason})}),
+  toggleDeviceNotifications: (deviceId:string,muted:boolean,csrfToken:string) => request<{id:string;notifications_muted:boolean}>(`/api/v1/notifications/devices/${deviceId}/toggle`,{method:"PUT",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({muted})}),
+  toggleMonitorNotifications: (monitorId:string,muted:boolean,csrfToken:string) => request<{id:string;notifications_muted:boolean}>(`/api/v1/notifications/monitors/${monitorId}/toggle`,{method:"PUT",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({muted})}),
   latestDiscovery: () => request<DiscoveryRun|null>("/api/v1/discovery/latest"),
   runDiscovery: (subnet:string, csrfToken:string) =>
     request<DiscoveryRun>("/api/v1/discovery/runs", { method:"POST", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify({subnet}) }),

@@ -42,6 +42,7 @@ class MonitorView(BaseModel):
     timeout_seconds: int
     verify_tls: bool
     enabled: bool
+    notifications_muted: bool
     severity: str
     status: str
     last_checked_at: datetime | None

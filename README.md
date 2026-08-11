@@ -29,6 +29,7 @@ Sentinel Home is a self-hosted home-network observability and security platform 
 - Remediation queue summaries with cancel, retry, and archive lifecycle controls
 - Security operations reporting with agent coverage, remediation outcomes, and device risk
 - Bulk notification dismissal and expiring per-device email alert muting
+- Persistent one-click notification mute switches for individual devices and service monitors
 - Read-only Docker inventory with container state, health, ports, restarts, and host filters
 
 ## Quick start

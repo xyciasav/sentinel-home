@@ -86,6 +86,7 @@ class Device(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     alerts_muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     alert_mute_reason: Mapped[str | None] = mapped_column(String(300))
+    notifications_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     addresses: Mapped[list["DeviceAddress"]] = relationship(cascade="all, delete-orphan")
     service_monitors: Mapped[list["ServiceMonitor"]] = relationship(
         back_populates="device", cascade="all, delete-orphan"
@@ -120,6 +121,7 @@ class ServiceMonitor(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=5)
     verify_tls: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    notifications_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     severity: Mapped[str] = mapped_column(String(20), default="normal")
     status: Mapped[str] = mapped_column(String(20), default="unknown")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

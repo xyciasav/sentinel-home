@@ -43,6 +43,7 @@ class DeviceView(BaseModel):
     notes: str | None
     alerts_muted_until: datetime | None
     alert_mute_reason: str | None
+    notifications_muted: bool
 
 
 def device_view(device: Device) -> DeviceView:
@@ -62,6 +63,7 @@ def device_view(device: Device) -> DeviceView:
         notes=device.notes,
         alerts_muted_until=device.alerts_muted_until,
         alert_mute_reason=device.alert_mute_reason,
+        notifications_muted=device.notifications_muted,
     )
 
 

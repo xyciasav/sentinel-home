@@ -11,7 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.config import get_settings
 from sentinel.database import get_session
-from sentinel.models import AuditEvent, Device, Incident, NotificationDelivery, Session, User
+from sentinel.models import (
+    AuditEvent,
+    Device,
+    Incident,
+    NotificationDelivery,
+    ServiceMonitor,
+    Session,
+    User,
+)
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -43,6 +51,15 @@ class MuteView(BaseModel):
     alert_mute_reason: str | None
 
 
+class ToggleMuteInput(BaseModel):
+    muted: bool
+
+
+class ToggleMuteView(BaseModel):
+    id: uuid.UUID
+    notifications_muted: bool
+
+
 async def send_email(
     database: AsyncSession,
     kind: str,
@@ -62,9 +79,19 @@ async def send_email(
     await database.flush()
     if incident and incident.device_id:
         device = await database.get(Device, incident.device_id)
+        if device and device.notifications_muted:
+            delivery.status = "muted"
+            delivery.error = "device notifications are muted"
+            return delivery
         if device and device.alerts_muted_until and device.alerts_muted_until > datetime.now(UTC):
             delivery.status = "muted"
             delivery.error = device.alert_mute_reason or "device alerts are muted"
+            return delivery
+    if incident and incident.monitor_id:
+        monitor = await database.get(ServiceMonitor, incident.monitor_id)
+        if monitor and monitor.notifications_muted:
+            delivery.status = "muted"
+            delivery.error = "service notifications are muted"
             return delivery
     if not settings.email_alerts_configured:
         delivery.error = "Resend email settings are not configured"
@@ -186,3 +213,51 @@ async def mute_device_alerts(
         alerts_muted_until=device.alerts_muted_until,
         alert_mute_reason=device.alert_mute_reason,
     )
+
+
+@router.put("/devices/{device_id}/toggle", response_model=ToggleMuteView)
+async def toggle_device_notifications(
+    device_id: uuid.UUID,
+    payload: ToggleMuteInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> ToggleMuteView:
+    device = await database.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
+    device.notifications_muted = payload.muted
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="device.notifications.mute" if payload.muted else "device.notifications.unmute",
+            target_type="device",
+            target_id=str(device.id),
+        )
+    )
+    await database.commit()
+    return ToggleMuteView(id=device.id, notifications_muted=device.notifications_muted)
+
+
+@router.put("/monitors/{monitor_id}/toggle", response_model=ToggleMuteView)
+async def toggle_monitor_notifications(
+    monitor_id: uuid.UUID,
+    payload: ToggleMuteInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> ToggleMuteView:
+    monitor = await database.get(ServiceMonitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "service monitor not found")
+    monitor.notifications_muted = payload.muted
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action=(
+                "monitor.notifications.mute" if payload.muted else "monitor.notifications.unmute"
+            ),
+            target_type="monitor",
+            target_id=str(monitor.id),
+        )
+    )
+    await database.commit()
+    return ToggleMuteView(id=monitor.id, notifications_muted=monitor.notifications_muted)
