@@ -223,6 +223,7 @@ class Incident(Base):
     severity: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(20), default="open")
     summary: Mapped[str] = mapped_column(String(500))
+    expected: Mapped[bool] = mapped_column(Boolean, default=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -241,6 +242,29 @@ class IncidentEvent(Base):
     kind: Mapped[str] = mapped_column(String(30))
     message: Mapped[str] = mapped_column(String(500))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MaintenanceWindow(Base):
+    __tablename__ = "maintenance_windows"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="CASCADE"), index=True
+    )
+    monitor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("service_monitors.id", ondelete="CASCADE"), index=True
+    )
+    day_of_week: Mapped[int | None] = mapped_column(Integer)
+    time_of_day: Mapped[str] = mapped_column(String(5))
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    timezone: Mapped[str] = mapped_column(String(100))
+    suppress_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class NotificationDelivery(Base):

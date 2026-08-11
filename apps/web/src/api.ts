@@ -16,7 +16,8 @@ export type ServiceMonitor = {
   last_failure_reason:string|null;
 };
 export type IncidentEvent = {kind:string;message:string;occurred_at:string};
-export type Incident = {id:string;monitor_id:string;title:string;severity:string;status:string;summary:string;started_at:string;recovered_at:string|null;acknowledged_at:string|null;events:IncidentEvent[]};
+export type Incident = {id:string;monitor_id:string;title:string;severity:string;status:string;summary:string;expected:boolean;started_at:string;recovered_at:string|null;acknowledged_at:string|null;events:IncidentEvent[]};
+export type MaintenanceWindow = {id:string;name:string;device_id:string|null;monitor_id:string|null;day_of_week:number|null;time_of_day:string;duration_minutes:number;timezone:string;suppress_notifications:boolean;enabled:boolean;active:boolean;created_at:string};
 export type Notification = {id:string;incident_id:string|null;kind:string;recipient:string|null;subject:string;status:string;error:string|null;created_at:string;sent_at:string|null};
 export type DiscoveredHost = {id:string;address:string;open_ports:number[];state:string;device_id:string|null;discovered_at:string};
 export type DiscoveryRun = {id:string;subnet:string;status:string;hosts_checked:number;hosts_found:number;started_at:string;completed_at:string|null;hosts:DiscoveredHost[]};
@@ -97,6 +98,9 @@ export const api = {
   deleteMonitor: (id:string, csrfToken:string) =>
     request<void>(`/api/v1/monitors/${id}`, { method:"DELETE", headers:{"X-CSRF-Token":csrfToken} }),
   incidents: () => request<Incident[]>("/api/v1/incidents"),
+  maintenance: () => request<MaintenanceWindow[]>("/api/v1/maintenance"),
+  createMaintenance: (payload:Record<string,unknown>,csrfToken:string) => request<MaintenanceWindow>("/api/v1/maintenance",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify(payload)}),
+  deleteMaintenance: (id:string,csrfToken:string) => request<void>(`/api/v1/maintenance/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":csrfToken}}),
   acknowledgeIncident: (id:string, csrfToken:string) =>
     request<Incident>(`/api/v1/incidents/${id}/acknowledge`, { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
   notifications: () => request<Notification[]>("/api/v1/notifications"),

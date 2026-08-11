@@ -16,6 +16,7 @@ from sentinel.devices import router as devices_router
 from sentinel.discovery import router as discovery_router
 from sentinel.health import database_status, redis_status
 from sentinel.incidents import router as incidents_router
+from sentinel.maintenance import router as maintenance_router
 from sentinel.monitoring import monitoring_loop
 from sentinel.notifications import router as notifications_router
 from sentinel.reports import router as reports_router
@@ -55,6 +56,7 @@ app.include_router(containers_router)
 app.include_router(devices_router)
 app.include_router(discovery_router)
 app.include_router(incidents_router)
+app.include_router(maintenance_router)
 app.include_router(notifications_router)
 app.include_router(reports_router)
 app.include_router(services_router)

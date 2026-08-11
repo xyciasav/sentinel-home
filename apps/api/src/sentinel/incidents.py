@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.database import get_session
+from sentinel.maintenance import active_maintenance
 from sentinel.models import (
     Agent,
     AgentMetric,
@@ -37,6 +38,7 @@ class IncidentView(BaseModel):
     severity: str
     status: str
     summary: str
+    expected: bool
     started_at: datetime
     recovered_at: datetime | None
     acknowledged_at: datetime | None
@@ -69,7 +71,11 @@ async def correlate_device_reboot(database: AsyncSession, incident: Incident) ->
     recovered_at = incident.recovered_at or datetime.now(UTC)
     if not incident.started_at - timedelta(minutes=5) <= booted_at <= recovered_at:
         return False
-    incident.summary = "Likely device reboot; service recovered after the host returned."
+    incident.summary = (
+        "Expected maintenance completed; agent uptime confirms the device rebooted."
+        if incident.expected
+        else "Likely device reboot; service recovered after the host returned."
+    )
     incident.events.append(
         IncidentEvent(
             kind="diagnosis",
@@ -93,36 +99,61 @@ async def record_monitor_transition(
     )
     if monitor.status == "down" and previous_status != "down" and active is None:
         reason = monitor.last_failure_reason or "service check failed"
+        maintenance = await active_maintenance(database, monitor, checked_at)
         incident = Incident(
             monitor_id=monitor.id,
             device_id=monitor.device_id,
             title=f"{monitor.name} is unavailable",
             severity=monitor.severity,
-            summary=reason,
+            summary=(
+                f"Expected maintenance: {maintenance.name}. {reason}" if maintenance else reason
+            ),
+            expected=maintenance is not None,
             started_at=checked_at,
             events=[IncidentEvent(kind="outage", message=reason, occurred_at=checked_at)],
         )
         database.add(incident)
         await database.flush()
-        delivery = await send_email(
-            database,
-            "outage",
-            f"[{monitor.severity.title()}] {monitor.name} is unavailable",
-            f"Sentinel Home detected that {monitor.name} is unavailable.\n\n"
-            f"Reason: {reason}\nURL: {monitor.url}\nDetected: {checked_at.isoformat()}",
-            incident,
-        )
-        incident.events.append(
-            IncidentEvent(
-                kind="notification",
-                message=f"Outage email {delivery.status}.",
-                occurred_at=checked_at,
+        if maintenance:
+            incident.events.append(
+                IncidentEvent(
+                    kind="maintenance",
+                    message=f"Matched maintenance window: {maintenance.name}.",
+                    occurred_at=checked_at,
+                )
             )
-        )
+        if maintenance and maintenance.suppress_notifications:
+            incident.events.append(
+                IncidentEvent(
+                    kind="notification",
+                    message="Outage notification suppressed by maintenance window.",
+                    occurred_at=checked_at,
+                )
+            )
+        else:
+            delivery = await send_email(
+                database,
+                "outage",
+                f"[{monitor.severity.title()}] {monitor.name} is unavailable",
+                f"Sentinel Home detected that {monitor.name} is unavailable.\n\n"
+                f"Reason: {reason}\nURL: {monitor.url}\nDetected: {checked_at.isoformat()}",
+                incident,
+            )
+            incident.events.append(
+                IncidentEvent(
+                    kind="notification",
+                    message=f"Outage email {delivery.status}.",
+                    occurred_at=checked_at,
+                )
+            )
     elif monitor.status == "up" and active is not None:
         active.status = "recovered"
         active.recovered_at = checked_at
-        active.summary = "Service recovered after a failed availability check."
+        active.summary = (
+            "Expected maintenance completed; service recovered."
+            if active.expected
+            else "Service recovered after a failed availability check."
+        )
         active.events.append(
             IncidentEvent(
                 kind="recovery",
@@ -131,22 +162,31 @@ async def record_monitor_transition(
             )
         )
         await correlate_device_reboot(database, active)
-        delivery = await send_email(
-            database,
-            "recovery",
-            f"[Recovered] {monitor.name} is available again",
-            f"Sentinel Home detected that {monitor.name} recovered.\n\n"
-            f"Response time: {monitor.last_response_ms or 0} ms\n"
-            f"Recovered: {checked_at.isoformat()}",
-            active,
-        )
-        active.events.append(
-            IncidentEvent(
-                kind="notification",
-                message=f"Recovery email {delivery.status}.",
-                occurred_at=checked_at,
+        if active.expected:
+            active.events.append(
+                IncidentEvent(
+                    kind="notification",
+                    message="Recovery notification suppressed for expected maintenance.",
+                    occurred_at=checked_at,
+                )
             )
-        )
+        else:
+            delivery = await send_email(
+                database,
+                "recovery",
+                f"[Recovered] {monitor.name} is available again",
+                f"Sentinel Home detected that {monitor.name} recovered.\n\n"
+                f"Response time: {monitor.last_response_ms or 0} ms\n"
+                f"Recovered: {checked_at.isoformat()}",
+                active,
+            )
+            active.events.append(
+                IncidentEvent(
+                    kind="notification",
+                    message=f"Recovery email {delivery.status}.",
+                    occurred_at=checked_at,
+                )
+            )
 
 
 @router.get("", response_model=list[IncidentView])
