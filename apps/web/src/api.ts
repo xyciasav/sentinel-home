@@ -48,13 +48,35 @@ export type AgentEnrollment = {enrollment_token:string;expires_at:string};
 export type AgentMetric = {cpu_percent:number;memory_percent:number;disk_percent:number;disk_free_bytes:number;uptime_seconds:number;collected_at:string};
 export type InstalledPackage = {name:string;version:string;architecture:string|null;manager:string;source_name:string|null;source_version:string|null;candidate_version:string|null;observed_at:string};
 
+let csrfRefresh: Promise<string> | null = null;
+
+async function freshCsrf(): Promise<string> {
+  if (!csrfRefresh) {
+    csrfRefresh = fetch("/api/v1/auth/csrf", { credentials:"same-origin" })
+      .then(async response => {
+        if (!response.ok) throw new Error("Your session expired. Sign in again.");
+        return (await response.json() as {csrf_token:string}).csrf_token;
+      })
+      .finally(() => { csrfRefresh = null; });
+  }
+  return csrfRefresh;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;
-  const response = await fetch(path, {
+  const requestHeaders:Record<string,string> = { "Content-Type": "application/json", ...(headers as Record<string, string> | undefined) };
+  let response = await fetch(path, {
     credentials: "same-origin",
     ...requestOptions,
-    headers: { "Content-Type": "application/json", ...(headers as Record<string, string> | undefined) }
+    headers: requestHeaders
   });
+  if (response.status === 403 && requestHeaders["X-CSRF-Token"]) {
+    const rejected = await response.clone().json().catch(() => ({})) as {detail?:unknown};
+    if (rejected.detail === "invalid CSRF token") {
+      requestHeaders["X-CSRF-Token"] = await freshCsrf();
+      response = await fetch(path, { credentials:"same-origin", ...requestOptions, headers:requestHeaders });
+    }
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
     const detail = body.detail;
