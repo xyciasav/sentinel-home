@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,8 @@ router = APIRouter(prefix="/api/v1/actions", tags=["action center"])
 
 
 class RemediationPlanView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     finding_id: uuid.UUID
     agent_id: uuid.UUID
