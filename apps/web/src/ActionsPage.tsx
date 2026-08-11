@@ -14,7 +14,9 @@ export function ActionsPage({
 }) {
   const [localItems, setLocalItems] = useState(items);
   const [busy, setBusy] = useState("");
+  const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "">("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState("all");
   const [device, setDevice] = useState("all");
@@ -54,6 +56,23 @@ export function ActionsPage({
     setLocalItems(current => current.map(item => item.finding_id === findingId ? {...item, ...change} : item));
   }
 
+  const actionable = visible.filter(item => item.automation_ready && (!item.plan || item.plan.status === "draft"));
+  const selectedItems = localItems.filter(item => selected.has(item.finding_id));
+  const selectedBuildable = selectedItems.filter(item => item.automation_ready && !item.plan);
+  const selectedDrafts = selectedItems.filter(item => item.plan?.status === "draft");
+
+  function toggle(findingId: string) {
+    setSelected(current => {
+      const next = new Set(current);
+      if (next.has(findingId)) next.delete(findingId); else next.add(findingId);
+      return next;
+    });
+  }
+
+  function selectVisible() {
+    setSelected(new Set(actionable.map(item => item.finding_id)));
+  }
+
   async function build(item: ActionItem) {
     setBusy(item.finding_id);
     setErrors(current => ({...current, [item.finding_id]: ""}));
@@ -91,6 +110,35 @@ export function ActionsPage({
     }
   }
 
+  async function buildSelected() {
+    setBulkBusy("build");
+    for (const item of selectedBuildable) await build(item);
+    setBulkBusy("");
+  }
+
+  async function approveSelected() {
+    if (!selectedDrafts.length || !window.confirm(
+      `Approve ${selectedDrafts.length} package upgrade plans? Approval is audited. Execution remains queued until the executor is installed.`
+    )) return;
+    setBulkBusy("approve");
+    for (const item of selectedDrafts) {
+      if (!item.plan) continue;
+      setErrors(current => ({...current, [item.finding_id]: ""}));
+      try {
+        const plan = await api.approveRemediationPlan(item.plan.id, csrf);
+        replaceItem(item.finding_id, {plan});
+      } catch (reason) {
+        setErrors(current => ({
+          ...current,
+          [item.finding_id]: reason instanceof Error ? reason.message : "Unable to approve plan"
+        }));
+      }
+    }
+    setSelected(new Set());
+    setBulkBusy("");
+    void refresh();
+  }
+
   return <>
     <header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with exact package evidence and an auditable approval gate.</p></div></header>
     <div className="notice panel"><b>Execution safety:</b> Approved plans enter the executor queue, but remain non-executing until the restricted root helper and signed agent protocol are installed.</div>
@@ -103,6 +151,13 @@ export function ActionsPage({
       <label>Group by<select value={groupBy} onChange={event => setGroupBy(event.target.value)}><option value="none">None</option><option value="device">Device</option><option value="severity">Severity</option><option value="status">Plan status</option></select></label>
       <b>{visible.length} of {localItems.length}</b>
     </div>
+    <div className="panel bulk-actions">
+      <div><b>{selected.size} selected</b><span>Select eligible findings to build or approve several package plans together.</span></div>
+      <button onClick={selectVisible} disabled={!actionable.length}>Select visible ({actionable.length})</button>
+      <button onClick={() => setSelected(new Set())} disabled={!selected.size}>Clear</button>
+      <button className="bulk-primary" onClick={() => void buildSelected()} disabled={!selectedBuildable.length || !!bulkBusy}>{bulkBusy === "build" ? "Building…" : `Build selected (${selectedBuildable.length})`}</button>
+      <button className="bulk-primary" onClick={() => void approveSelected()} disabled={!selectedDrafts.length || !!bulkBusy}>{bulkBusy === "approve" ? "Approving…" : `Approve selected (${selectedDrafts.length})`}</button>
+    </div>
     {localItems.length === 0
       ? <div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>
       : visible.length === 0
@@ -114,6 +169,8 @@ export function ActionsPage({
             item={item}
             busy={busy}
             error={errors[item.finding_id]}
+            selected={selected.has(item.finding_id)}
+            toggle={toggle}
             build={build}
             approve={approve}
           />)}</div>
@@ -125,17 +182,22 @@ function ActionCard({
   item,
   busy,
   error,
+  selected,
+  toggle,
   build,
   approve
 }: {
   item: ActionItem;
   busy: string;
   error?: string;
+  selected: boolean;
+  toggle: (findingId: string) => void;
   build: (item: ActionItem) => Promise<void>;
   approve: (item: ActionItem) => Promise<void>;
 }) {
-  return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""}`}>
-    <div className="action-priority"><strong>{item.priority}</strong><small>PRIORITY</small></div>
+  const selectable = item.automation_ready && (!item.plan || item.plan.status === "draft");
+  return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""} ${selected ? "selected" : ""}`}>
+    <div className="action-priority"><label className="action-select"><input type="checkbox" checked={selected} disabled={!selectable} onChange={() => toggle(item.finding_id)} /><span>Select</span></label><strong>{item.priority}</strong><small>PRIORITY</small></div>
     <div>
       <div className="action-title"><span className={`severity ${item.severity}`}>{item.severity}</span><h2>{item.cve_id}</h2>{item.known_exploited && <span className="kev-badge">CISA KEV</span>}</div>
       <p><b>{item.device_name || item.address}</b> · {item.address} · Device criticality: {item.device_criticality || "unassigned"}</p>

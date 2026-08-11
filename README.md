@@ -24,6 +24,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - OSV-backed Debian/Ubuntu source-package vulnerability matching with installed and fixed versions
 - Audited, approval-gated Linux package remediation plans (execution remains disabled)
 - Filterable Action Center with immediate playbook and approval state updates
+- Multi-select package findings for bulk playbook creation and approval
 
 ## Quick start
 
