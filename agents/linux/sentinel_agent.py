@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 
 
 def request(url: str, payload: dict | None, token: str | None = None) -> dict:

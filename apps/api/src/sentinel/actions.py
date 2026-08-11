@@ -74,6 +74,20 @@ def priority(finding: VulnerabilityFinding, criticality: str | None) -> int:
     return min(score, 100)
 
 
+def automation_blocker(finding: VulnerabilityFinding, agent: Agent | None) -> str:
+    if finding.detection_method != "osv-agent-package":
+        return (
+            "This is a network/service finding, so there is no verified Linux package to upgrade. "
+            "Inspect it manually or scan an enrolled agent on this device for package-level "
+            "evidence."
+        )
+    if agent is None:
+        return "Install or reconnect the Linux agent for this device before building a playbook."
+    return (
+        "Collect the exact installed package and vendor fixed version before building a playbook."
+    )
+
+
 @router.get("", response_model=list[ActionItemView])
 async def list_actions(
     database: Annotated[AsyncSession, Depends(get_session)],
@@ -109,6 +123,7 @@ async def list_actions(
             device_criticality=device.criticality if device else None,
             automation_ready=bool(
                 agent
+                and finding.detection_method == "osv-agent-package"
                 and finding.affected_package
                 and finding.installed_version
                 and finding.fixed_version
@@ -119,8 +134,7 @@ async def list_actions(
                 and finding.affected_package
                 and finding.installed_version
                 and finding.fixed_version
-                else "Install or update the Linux agent and collect the exact package, installed "
-                "version, and fixed version before a playbook can be approved."
+                else automation_blocker(finding, agent)
             ),
             priority=priority(finding, device.criticality if device else None),
             affected_package=finding.affected_package,
@@ -148,6 +162,11 @@ async def build_plan(
     finding = await database.get(VulnerabilityFinding, finding_id)
     if finding is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "vulnerability finding not found")
+    if finding.detection_method != "osv-agent-package":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "network and service findings cannot be converted into package playbooks",
+        )
     if not all(
         (
             finding.device_id,

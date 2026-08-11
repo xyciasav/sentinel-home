@@ -14,6 +14,11 @@ import { AgentsPage } from "./AgentsPage";
 import { ContainersPage } from "./ContainersPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
+type Page = "overview" | "devices" | "agents" | "containers" | "discovery" | "changes" | "storage" | "services" | "incidents" | "notifications" | "vulnerabilities" | "actions" | "reports";
+
+const assetPages:Page[]=["devices","agents","containers","discovery","changes","storage"];
+const monitoringPages:Page[]=["services","incidents","notifications"];
+const securityPages:Page[]=["vulnerabilities","actions","reports"];
 
 export function App() {
   const [view, setView] = useState<View>("loading");
@@ -21,7 +26,7 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
-  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents" | "notifications" | "discovery" | "changes" | "vulnerabilities" | "storage" | "reports" | "actions" | "agents" | "containers">("overview");
+  const [page, setPage] = useState<Page>("overview");
   const [devices, setDevices] = useState<Device[]>([]);
   const [monitors, setMonitors] = useState<ServiceMonitor[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -91,10 +96,10 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="reports"?"active":""} onClick={()=>{setPage("reports");void loadReport()}}>Reports</button><button className={page==="actions"?"active":""} onClick={()=>{setPage("actions");void loadActions()}}>Action Center</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="agents"?"active":""} onClick={()=>{setPage("agents");void loadAgents()}}>Agents</button><button className={page==="containers"?"active":""} onClick={()=>{setPage("containers");void loadContainers()}}>Containers</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={page==="notifications"?"active":""} onClick={()=>setPage("notifications")}>Notifications</button><button className={page==="discovery"?"active":""} onClick={()=>{setPage("discovery");void loadDiscovery()}}>Discovery</button><button className={page==="changes"?"active":""} onClick={()=>{setPage("changes");void loadChanges()}}>Network changes</button><button className={page==="vulnerabilities"?"active":""} onClick={()=>{setPage("vulnerabilities");void loadFindings()}}>Vulnerabilities</button><button className={page==="storage"?"active":""} onClick={()=>{setPage("storage");void loadStorage()}}>Storage</button></nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={assetPages.includes(page)?"active":""} onClick={()=>setPage("devices")}>Assets</button><button className={monitoringPages.includes(page)?"active":""} onClick={()=>setPage("services")}>Monitoring{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={securityPages.includes(page)?"active":""} onClick={()=>{setPage("vulnerabilities");void loadFindings()}}>Security</button></nav>
       <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>{page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
+    <main><WorkspaceNav page={page} setPage={setPage} loadAgents={loadAgents} loadContainers={loadContainers} loadDiscovery={loadDiscovery} loadChanges={loadChanges} loadStorage={loadStorage} loadFindings={loadFindings} loadActions={loadActions} loadReport={loadReport}/>{page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
@@ -108,6 +113,12 @@ export function App() {
       </section>
     </>}</main>
   </div>;
+}
+
+function WorkspaceNav({page,setPage,loadAgents,loadContainers,loadDiscovery,loadChanges,loadStorage,loadFindings,loadActions,loadReport}:{page:Page;setPage:(page:Page)=>void;loadAgents:()=>Promise<void>;loadContainers:()=>Promise<void>;loadDiscovery:()=>Promise<void>;loadChanges:()=>Promise<void>;loadStorage:()=>Promise<void>;loadFindings:()=>Promise<void>;loadActions:()=>Promise<void>;loadReport:()=>Promise<void>}){
+  const open=(target:Page,load?:()=>Promise<void>)=>{setPage(target);if(load)void load()};
+  const items:([Page,string,(()=>Promise<void>)?])[]=assetPages.includes(page)?[["devices","Devices"],["agents","Agents",loadAgents],["containers","Containers",loadContainers],["discovery","Discovery",loadDiscovery],["changes","Changes",loadChanges],["storage","Storage",loadStorage]]:monitoringPages.includes(page)?[["services","Services"],["incidents","Incidents"],["notifications","Notifications"]]:securityPages.includes(page)?[["vulnerabilities","Vulnerabilities",loadFindings],["actions","Action Center",loadActions],["reports","Reports",loadReport]]:[];
+  return items.length?<div className="workspace-nav" aria-label="Workspace sections">{items.map(([target,label,load])=><button key={target} className={page===target?"active":""} onClick={()=>open(target,load)}>{label}</button>)}</div>:null;
 }
 
 function Brand(){return <div className="brand"><span className="brand-mark">S</span><div><strong>Sentinel</strong><small>HOME NETWORK</small></div></div>}

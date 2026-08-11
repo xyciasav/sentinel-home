@@ -44,20 +44,20 @@ def run() -> int:
         check=True,
     )
     subprocess.run(  # noqa: S603
-        [
-            "/usr/bin/apt-get",
-            "install",
-            "--only-upgrade",
-            "--assume-yes",
-            f"{package}={target}",
-        ],
+        ["/usr/bin/apt-get", "install", "--only-upgrade", "--assume-yes", package],
         timeout=900,
         check=True,
     )
     updated = installed_version(package)
-    if updated != target:
-        raise RuntimeError(f"post-upgrade verification failed: expected {target}, found {updated}")
-    print(f"verified {package} {current} -> {updated}")
+    if updated == current:
+        raise RuntimeError(
+            f"repository did not provide an upgrade for {package}; still at {updated} "
+            f"(advisory fix threshold {target})"
+        )
+    print(
+        f"verified repository upgrade {package} {current} -> {updated}; "
+        f"advisory fix threshold {target} will be confirmed by the next package scan"
+    )
     return 0
 
 

@@ -149,7 +149,7 @@ export function ActionsPage({
 
   async function releaseSelected() {
     if (!selectedApproved.length || !window.confirm(
-      `Run ${selectedApproved.length} approved package upgrades on their Linux systems? The agents will install the exact reviewed versions.`
+      `Run ${selectedApproved.length} approved package upgrades? Agents will install each repository candidate and report the result for verification.`
     )) return;
     setBulkBusy("release");
     for (const item of selectedApproved) {
@@ -191,8 +191,23 @@ export function ActionsPage({
     }
   }
 
+  async function triage(item: ActionItem, status: "investigating" | "false_positive") {
+    if (status === "false_positive" && !window.confirm(`Dismiss ${item.cve_id} as a false positive?`)) return;
+    setBusy(item.finding_id);
+    try {
+      await api.updateFinding(item.finding_id, status, null, csrf);
+      if (status === "false_positive") setLocalItems(current => current.filter(value => value.finding_id !== item.finding_id));
+      else replaceItem(item.finding_id, {finding_status: status});
+      void refresh();
+    } catch (reason) {
+      setErrors(current => ({...current,[item.finding_id]:reason instanceof Error?reason.message:"Unable to update finding"}));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return <>
-    <header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with exact package evidence and an auditable approval gate.</p></div></header>
+    <header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with verified package evidence and an auditable approval gate.</p></div></header>
     <div className="notice panel"><b>Execution safety:</b> Approved plans enter the executor queue, but remain non-executing until the restricted root helper and signed agent protocol are installed.</div>
     <section className="action-summary"><article><b>{summary.ready}</b><span>Ready to build</span></article><article><b>{summary.review}</b><span>Awaiting approval</span></article><article><b>{summary.queued}</b><span>Approved / running</span></article><article className={summary.failed?"danger":""}><b>{summary.failed}</b><span>Failed</span></article><article><b>{summary.completed}</b><span>Completed</span></article></section>
     <div className="panel finding-filters action-filters">
@@ -228,6 +243,7 @@ export function ActionsPage({
             build={build}
             approve={approve}
             transition={transition}
+            triage={triage}
           />)}</div>
         </section>)}
   </>;
@@ -241,7 +257,8 @@ function ActionCard({
   toggle,
   build,
   approve,
-  transition
+  transition,
+  triage
 }: {
   item: ActionItem;
   busy: string;
@@ -251,6 +268,7 @@ function ActionCard({
   build: (item: ActionItem) => Promise<void>;
   approve: (item: ActionItem) => Promise<void>;
   transition: (item: ActionItem, kind: "cancel" | "retry" | "archive") => Promise<void>;
+  triage: (item: ActionItem, status: "investigating" | "false_positive") => Promise<void>;
 }) {
   const selectable = item.automation_ready && (!item.plan || ["draft", "approved"].includes(item.plan.status));
   return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""} ${selected ? "selected" : ""}`}>
@@ -274,6 +292,7 @@ function ActionCard({
         : item.plan.status === "draft"
           ? <button className="primary compact" onClick={() => void approve(item)} disabled={busy === item.plan.id}>{busy === item.plan.id ? "Approving…" : "Review & approve"}</button>
           : <button disabled>{item.plan.status === "approved" ? "Select to run" : item.plan.status === "dispatched" ? "Executing" : item.plan.status}</button>}
+      {!item.plan && !item.automation_ready && <><button onClick={()=>void triage(item,"investigating")} disabled={busy===item.finding_id}>Investigate</button><button className="secondary-action" onClick={()=>void triage(item,"false_positive")} disabled={busy===item.finding_id}>Dismiss</button></>}
       {item.plan && ["approved", "queued"].includes(item.plan.status) && <button className="secondary-action" onClick={() => void transition(item,"cancel")} disabled={busy === item.plan.id}>Cancel</button>}
       {item.plan?.status === "failed" && <button onClick={() => void transition(item,"retry")} disabled={busy === item.plan.id}>Retry</button>}
       {item.plan && ["completed", "failed", "canceled"].includes(item.plan.status) && <button className="secondary-action" onClick={() => void transition(item,"archive")} disabled={busy === item.plan.id}>Archive</button>}

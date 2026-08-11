@@ -17,7 +17,7 @@ install -d -o root -g root -m 0755 /etc/systemd/system/sentinel-agent.service.d
 cat >/etc/systemd/system/sentinel-agent.service.d/executor.conf <<'EOF'
 [Service]
 NoNewPrivileges=false
-ReadWritePaths=/var/lib/apt /var/cache/apt /etc/apt /usr /lib /bin /sbin
+ReadWritePaths=/var/lib/apt /var/lib/dpkg /var/cache/apt /var/log/apt /etc/apt /usr /lib /bin /sbin
 EOF
 systemctl daemon-reload
 systemctl restart sentinel-agent
