@@ -262,9 +262,7 @@ async def source_view(database: AsyncSession, source: InventorySource) -> Source
         last_sync_status=source.last_sync_status,
         last_sync_error=source.last_sync_error,
         device_count=len(devices),
-        importable_count=sum(
-            bool(item.address and not item.imported_device_id) for item in devices
-        ),
+        importable_count=sum(not item.imported_device_id for item in devices),
         imported_count=sum(bool(item.imported_device_id) for item in devices),
         summary=json.loads(source.summary_json) if source.summary_json else None,
     )
@@ -430,25 +428,38 @@ async def import_source_devices(
     )
     imported = 0
     for item in candidates:
-        if item.imported_device_id or not item.address or not _private_address(item.address):
+        if item.imported_device_id:
             continue
-        existing = await database.scalar(
-            select(DeviceAddress).where(DeviceAddress.address == item.address)
-        )
-        if existing:
-            item.imported_device_id = existing.device_id
+        if item.address and not _private_address(item.address):
+            continue
+        existing_device = None
+        if item.mac_address:
+            existing_device = await database.scalar(
+                select(Device).where(Device.mac_address == item.mac_address.lower())
+            )
+        if existing_device is None and item.address:
+            existing_address = await database.scalar(
+                select(DeviceAddress).where(DeviceAddress.address == item.address)
+            )
+            if existing_address:
+                existing_device = await database.get(Device, existing_address.device_id)
+        if existing_device:
+            item.imported_device_id = existing_device.id
+            if not existing_device.mac_address and item.mac_address:
+                existing_device.mac_address = item.mac_address.lower()
             continue
         notes = " · ".join(
             value for value in (item.manufacturer, item.model, item.area_name) if value
         )
         device = Device(
             display_name=item.name[:100],
+            mac_address=item.mac_address.lower() if item.mac_address else None,
             device_type="pihole-client" if source.kind == "pihole" else "home-assistant",
             trust=DeviceTrust.unknown,
             criticality="normal",
             monitor_port=None,
             notes=f"Imported from {source.name}{': ' + notes if notes else ''}",
-            addresses=[DeviceAddress(address=item.address, kind="host")],
+            addresses=[DeviceAddress(address=item.address, kind="host")] if item.address else [],
         )
         database.add(device)
         await database.flush()

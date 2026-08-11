@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,7 +10,15 @@ from sqlalchemy.orm import selectinload
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.database import get_session
-from sentinel.models import Incident, IncidentEvent, ServiceMonitor, Session, User
+from sentinel.models import (
+    Agent,
+    AgentMetric,
+    Incident,
+    IncidentEvent,
+    ServiceMonitor,
+    Session,
+    User,
+)
 from sentinel.notifications import send_email
 
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -40,6 +48,39 @@ def incident_view(item: Incident) -> IncidentView:
         **{field: getattr(item, field) for field in IncidentView.model_fields if field != "events"},
         events=[EventView.model_validate(event, from_attributes=True) for event in item.events],
     )
+
+
+async def correlate_device_reboot(database: AsyncSession, incident: Incident) -> bool:
+    if not incident.device_id or any(event.kind == "diagnosis" for event in incident.events):
+        return False
+    metric = await database.scalar(
+        select(AgentMetric)
+        .join(Agent, Agent.id == AgentMetric.agent_id)
+        .where(
+            Agent.device_id == incident.device_id,
+            AgentMetric.collected_at >= incident.started_at - timedelta(minutes=5),
+        )
+        .order_by(AgentMetric.collected_at.desc())
+        .limit(1)
+    )
+    if metric is None:
+        return False
+    booted_at = metric.collected_at - timedelta(seconds=metric.uptime_seconds)
+    recovered_at = incident.recovered_at or datetime.now(UTC)
+    if not incident.started_at - timedelta(minutes=5) <= booted_at <= recovered_at:
+        return False
+    incident.summary = "Likely device reboot; service recovered after the host returned."
+    incident.events.append(
+        IncidentEvent(
+            kind="diagnosis",
+            message=(
+                f"Agent uptime indicates the device booted at {booted_at.isoformat()}, "
+                "within the outage window."
+            ),
+            occurred_at=metric.collected_at,
+        )
+    )
+    return True
 
 
 async def record_monitor_transition(
@@ -89,6 +130,7 @@ async def record_monitor_transition(
                 occurred_at=checked_at,
             )
         )
+        await correlate_device_reboot(database, active)
         delivery = await send_email(
             database,
             "recovery",
@@ -112,9 +154,19 @@ async def list_incidents(
     database: Annotated[AsyncSession, Depends(get_session)],
     _authenticated: Annotated[tuple[User, Session], Depends(authenticated_session)],
 ) -> list[IncidentView]:
-    items = await database.scalars(
-        select(Incident).options(selectinload(Incident.events)).order_by(Incident.started_at.desc())
+    items = list(
+        await database.scalars(
+            select(Incident)
+            .options(selectinload(Incident.events))
+            .order_by(Incident.started_at.desc())
+        )
     )
+    changed = False
+    for item in items:
+        if item.status == "recovered":
+            changed = await correlate_device_reboot(database, item) or changed
+    if changed:
+        await database.commit()
     return [incident_view(item) for item in items]
 
 

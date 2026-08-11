@@ -73,6 +73,7 @@ class Device(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     display_name: Mapped[str] = mapped_column(String(100))
     hostname: Mapped[str | None] = mapped_column(String(255))
+    mac_address: Mapped[str | None] = mapped_column(String(30), unique=True)
     trust: Mapped[DeviceTrust] = mapped_column(Enum(DeviceTrust), default=DeviceTrust.unknown)
     device_type: Mapped[str | None] = mapped_column(String(50))
     criticality: Mapped[str] = mapped_column(String(20), default="normal")
