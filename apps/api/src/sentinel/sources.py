@@ -25,6 +25,7 @@ from sentinel.models import (
     DeviceAddress,
     DeviceTrust,
     InventorySource,
+    NetworkIdentityEvent,
     Session,
     SourceDevice,
     User,
@@ -89,6 +90,16 @@ class NetworkAssetView(BaseModel):
 class LinkNetworkIdentityInput(BaseModel):
     observation_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     device_id: uuid.UUID | None = None
+
+
+class NetworkIdentityEventView(BaseModel):
+    id: uuid.UUID
+    kind: str
+    name: str
+    source_name: str
+    old_value: str | None
+    new_value: str | None
+    occurred_at: datetime
 
 
 def safe_base_url(value: str) -> str:
@@ -383,11 +394,13 @@ async def synchronize_source(database: AsyncSession, source: InventorySource) ->
         now = datetime.now(UTC)
         for values in incoming:
             item = existing.get(values["external_id"])
+            created = item is None
+            previous_address = item.address if item is not None else None
             if item is None:
                 item = SourceDevice(source_id=source.id, **values)
                 database.add(item)
+                await database.flush()
             else:
-                previous_address = item.address
                 for key, value in values.items():
                     if key == "address" and value is None:
                         continue
@@ -414,6 +427,29 @@ async def synchronize_source(database: AsyncSession, source: InventorySource) ->
                         imported_address.address = new_address
                         imported_address.last_seen_at = now
             item.last_seen_at = now
+            if created:
+                database.add(
+                    NetworkIdentityEvent(
+                        source_id=source.id,
+                        source_device_id=item.id,
+                        kind="identity_seen",
+                        name=item.name,
+                        new_value=item.address or item.mac_address or "identity only",
+                        occurred_at=now,
+                    )
+                )
+            elif values.get("address") and values["address"] != previous_address:
+                database.add(
+                    NetworkIdentityEvent(
+                        source_id=source.id,
+                        source_device_id=item.id,
+                        kind="address_changed",
+                        name=item.name,
+                        old_value=previous_address,
+                        new_value=values["address"],
+                        occurred_at=now,
+                    )
+                )
             if item.imported_device_id is None:
                 matched_device = None
                 if item.mac_address:
@@ -526,6 +562,33 @@ async def network_inventory(
             )
         )
     return sorted(result, key=lambda item: (not item.linked, item.name.lower()))
+
+
+@router.get("/network-activity", response_model=list[NetworkIdentityEventView])
+async def network_activity(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[NetworkIdentityEventView]:
+    rows = (
+        await database.execute(
+            select(NetworkIdentityEvent, InventorySource.name)
+            .outerjoin(InventorySource, InventorySource.id == NetworkIdentityEvent.source_id)
+            .order_by(NetworkIdentityEvent.occurred_at.desc())
+            .limit(500)
+        )
+    ).all()
+    return [
+        NetworkIdentityEventView(
+            id=event.id,
+            kind=event.kind,
+            name=event.name,
+            source_name=source_name or "Disconnected source",
+            old_value=event.old_value,
+            new_value=event.new_value,
+            occurred_at=event.occurred_at,
+        )
+        for event, source_name in rows
+    ]
 
 
 @router.post("/network-inventory/link", status_code=204)

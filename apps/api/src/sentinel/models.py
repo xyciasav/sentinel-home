@@ -145,6 +145,24 @@ class SourceDevice(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class NetworkIdentityEvent(Base):
+    __tablename__ = "network_identity_events"
+    __table_args__ = (Index("ix_network_identity_events_occurred", "occurred_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("inventory_sources.id", ondelete="SET NULL"), index=True
+    )
+    source_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("source_devices.id", ondelete="SET NULL"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(255))
+    old_value: Mapped[str | None] = mapped_column(String(255))
+    new_value: Mapped[str | None] = mapped_column(String(255))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ServiceMonitor(Base):
     __tablename__ = "service_monitors"
 
