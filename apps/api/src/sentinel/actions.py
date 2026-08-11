@@ -126,11 +126,14 @@ async def list_actions(
             .outerjoin(Agent, (Agent.device_id == Device.id) & Agent.revoked_at.is_(None))
             .outerjoin(RemediationPlan, RemediationPlan.finding_id == VulnerabilityFinding.id)
             .where(
-                or_(
-                    VulnerabilityFinding.status.in_(("open", "investigating")),
-                    and_(
-                        RemediationPlan.id.is_not(None),
+                and_(
+                    or_(
+                        RemediationPlan.id.is_(None),
                         RemediationPlan.status != "archived",
+                    ),
+                    or_(
+                        VulnerabilityFinding.status.in_(("open", "investigating")),
+                        RemediationPlan.id.is_not(None),
                     ),
                 )
             )
