@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { ActionItem, Agent, api, ContainerInstance, Device, DiscoveryRun, Incident, InventorySource, MaintenanceWindow, NetworkChange, Notification, OverviewReport, ServiceMonitor, StorageScanJob, StorageTarget, User, VulnerabilityFinding } from "./api";
+import { ActionItem, Agent, api, ApplicationIntegration, ContainerInstance, Device, DiscoveryRun, Incident, InventorySource, MaintenanceWindow, NetworkChange, Notification, OverviewReport, ServiceMonitor, StorageScanJob, StorageTarget, User, VulnerabilityFinding } from "./api";
 import { DevicesPage } from "./DevicesPage";
 import { ServicesPage } from "./ServicesPage";
 import { IncidentsPage } from "./IncidentsPage";
@@ -15,12 +15,13 @@ import { ContainersPage } from "./ContainersPage";
 import { SourcesPage } from "./SourcesPage";
 import { NetworkPage } from "./NetworkPage";
 import { MaintenancePage } from "./MaintenancePage";
+import { ApplicationsPage } from "./ApplicationsPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
-type Page = "overview" | "devices" | "agents" | "containers" | "network" | "sources" | "discovery" | "changes" | "storage" | "services" | "incidents" | "notifications" | "maintenance" | "vulnerabilities" | "actions" | "reports";
+type Page = "overview" | "devices" | "agents" | "containers" | "network" | "sources" | "discovery" | "changes" | "storage" | "services" | "applications" | "incidents" | "notifications" | "maintenance" | "vulnerabilities" | "actions" | "reports";
 
 const assetPages:Page[]=["devices","agents","containers","network","sources","discovery","changes","storage"];
-const monitoringPages:Page[]=["services","incidents","notifications","maintenance"];
+const monitoringPages:Page[]=["services","applications","incidents","notifications","maintenance"];
 const securityPages:Page[]=["vulnerabilities","actions","reports"];
 
 export function App() {
@@ -45,6 +46,7 @@ export function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [containers, setContainers] = useState<ContainerInstance[]>([]);
   const [sources, setSources] = useState<InventorySource[]>([]);
+  const [applications, setApplications] = useState<ApplicationIntegration[]>([]);
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
@@ -90,6 +92,7 @@ export function App() {
   async function loadAgents() { setAgents(await api.agents()); }
   async function loadContainers() { setContainers(await api.containers()); }
   async function loadSources() { setSources(await api.sources()); }
+  async function loadApplications() { setApplications(await api.applications()); }
   async function loadNetwork() { await Promise.all([loadSources(),loadDiscovery(),loadChanges()]); }
   function updateDiscoveryHost(host: DiscoveryRun["hosts"][number]) { setDiscovery(current=>current?{...current,hosts:current.hosts.map(item=>item.id===host.id?host:item)}:current); }
   function updateVulnerability(finding: VulnerabilityFinding) { setFindings(current=>current.map(item=>item.id===finding.id?finding:item)); }
@@ -108,7 +111,7 @@ export function App() {
       <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={assetPages.includes(page)?"active":""} onClick={()=>setPage("devices")}>Assets</button><button className={monitoringPages.includes(page)?"active":""} onClick={()=>setPage("services")}>Monitoring{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={securityPages.includes(page)?"active":""} onClick={()=>{setPage("vulnerabilities");void loadFindings()}}>Security</button></nav>
       <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main><WorkspaceNav page={page} setPage={setPage} loadAgents={loadAgents} loadContainers={loadContainers} loadNetwork={loadNetwork} loadStorage={loadStorage} loadFindings={loadFindings} loadActions={loadActions} loadReport={loadReport}/>{page==="maintenance" ? <MaintenancePage windows={maintenance} devices={devices} monitors={monitors} csrf={csrf} refresh={loadMaintenance}/> : page==="network" ? <NetworkPage sources={sources} run={discovery} changes={changes} csrf={csrf} refreshSources={loadSources} refreshDiscovery={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="sources" ? <SourcesPage sources={sources} csrf={csrf} refresh={loadSources} refreshDevices={loadDevices}/> : page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
+    <main><WorkspaceNav page={page} setPage={setPage} loadAgents={loadAgents} loadContainers={loadContainers} loadNetwork={loadNetwork} loadStorage={loadStorage} loadFindings={loadFindings} loadActions={loadActions} loadReport={loadReport} loadApplications={loadApplications}/>{page==="applications" ? <ApplicationsPage items={applications} csrf={csrf} refresh={loadApplications}/> : page==="maintenance" ? <MaintenancePage windows={maintenance} devices={devices} monitors={monitors} csrf={csrf} refresh={loadMaintenance}/> : page==="network" ? <NetworkPage sources={sources} run={discovery} changes={changes} csrf={csrf} refreshSources={loadSources} refreshDiscovery={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="sources" ? <SourcesPage sources={sources} csrf={csrf} refresh={loadSources} refreshDevices={loadDevices}/> : page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />
@@ -124,9 +127,9 @@ export function App() {
   </div>;
 }
 
-function WorkspaceNav({page,setPage,loadAgents,loadContainers,loadNetwork,loadStorage,loadFindings,loadActions,loadReport}:{page:Page;setPage:(page:Page)=>void;loadAgents:()=>Promise<void>;loadContainers:()=>Promise<void>;loadNetwork:()=>Promise<void>;loadStorage:()=>Promise<void>;loadFindings:()=>Promise<void>;loadActions:()=>Promise<void>;loadReport:()=>Promise<void>}){
+function WorkspaceNav({page,setPage,loadAgents,loadContainers,loadNetwork,loadStorage,loadFindings,loadActions,loadReport,loadApplications}:{page:Page;setPage:(page:Page)=>void;loadAgents:()=>Promise<void>;loadContainers:()=>Promise<void>;loadNetwork:()=>Promise<void>;loadStorage:()=>Promise<void>;loadFindings:()=>Promise<void>;loadActions:()=>Promise<void>;loadReport:()=>Promise<void>;loadApplications:()=>Promise<void>}){
   const open=(target:Page,load?:()=>Promise<void>)=>{setPage(target);if(load)void load()};
-  const items:([Page,string,(()=>Promise<void>)?])[]=assetPages.includes(page)?[["devices","Devices"],["agents","Agents",loadAgents],["containers","Containers",loadContainers],["network","Network",loadNetwork],["storage","Storage",loadStorage]]:monitoringPages.includes(page)?[["services","Services"],["incidents","Incidents"],["notifications","Notifications"],["maintenance","Maintenance"]]:securityPages.includes(page)?[["vulnerabilities","Vulnerabilities",loadFindings],["actions","Action Center",loadActions],["reports","Reports",loadReport]]:[];
+  const items:([Page,string,(()=>Promise<void>)?])[]=assetPages.includes(page)?[["devices","Devices"],["agents","Agents",loadAgents],["containers","Containers",loadContainers],["network","Network",loadNetwork],["storage","Storage",loadStorage]]:monitoringPages.includes(page)?[["services","Services"],["applications","Applications",loadApplications],["incidents","Incidents"],["notifications","Notifications"],["maintenance","Maintenance"]]:securityPages.includes(page)?[["vulnerabilities","Vulnerabilities",loadFindings],["actions","Action Center",loadActions],["reports","Reports",loadReport]]:[];
   return items.length?<div className="workspace-nav" aria-label="Workspace sections">{items.map(([target,label,load])=><button key={target} className={page===target?"active":""} onClick={()=>open(target,load)}>{label}</button>)}</div>:null;
 }
 

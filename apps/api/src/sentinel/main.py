@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 
 from sentinel.actions import router as actions_router
 from sentinel.agents import router as agents_router
+from sentinel.applications import application_sync_loop
+from sentinel.applications import router as applications_router
 from sentinel.auth import router as auth_router
 from sentinel.config import get_settings
 from sentinel.containers import router as containers_router
@@ -32,10 +34,11 @@ from sentinel.vulnerabilities import router as vulnerabilities_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_settings()
-    monitor_task = source_task = None
+    monitor_task = source_task = application_task = None
     if get_settings().database_url:
         monitor_task = asyncio.create_task(monitoring_loop())
         source_task = asyncio.create_task(source_sync_loop())
+        application_task = asyncio.create_task(application_sync_loop())
         await recover_storage_jobs()
     yield
     if monitor_task:
@@ -46,10 +49,15 @@ async def lifespan(_: FastAPI):
         source_task.cancel()
         with suppress(asyncio.CancelledError):
             await source_task
+    if application_task:
+        application_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await application_task
 
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)
 app.include_router(actions_router)
+app.include_router(applications_router)
 app.include_router(agents_router)
 app.include_router(auth_router)
 app.include_router(containers_router)
