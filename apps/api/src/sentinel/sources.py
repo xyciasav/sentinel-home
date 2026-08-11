@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
@@ -70,6 +71,18 @@ class SourceDeviceView(BaseModel):
 
 class ImportInput(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class NetworkAssetView(BaseModel):
+    id: str
+    name: str
+    address: str | None
+    mac_address: str | None
+    status: str
+    sources: list[str]
+    observations: int
+    linked: bool
+    last_seen_at: datetime | None
 
 
 def safe_base_url(value: str) -> str:
@@ -449,6 +462,62 @@ async def list_sources(
 ) -> list[SourceView]:
     sources = list(await database.scalars(select(InventorySource).order_by(InventorySource.name)))
     return [await source_view(database, item) for item in sources]
+
+
+@router.get("/network-inventory", response_model=list[NetworkAssetView])
+async def network_inventory(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[NetworkAssetView]:
+    devices = list(
+        await database.scalars(
+            select(Device).options(selectinload(Device.addresses)).order_by(Device.display_name)
+        )
+    )
+    observations = list(await database.scalars(select(SourceDevice)))
+    source_names = {
+        source.id: source.name for source in await database.scalars(select(InventorySource))
+    }
+    linked_by_device: dict[uuid.UUID, list[SourceDevice]] = {}
+    unlinked_groups: dict[str, list[SourceDevice]] = {}
+    for item in observations:
+        if item.imported_device_id:
+            linked_by_device.setdefault(item.imported_device_id, []).append(item)
+        else:
+            identity = item.mac_address or item.address or f"{item.source_id}:{item.external_id}"
+            unlinked_groups.setdefault(identity.lower(), []).append(item)
+    result = []
+    for device in devices:
+        linked = linked_by_device.get(device.id, [])
+        result.append(
+            NetworkAssetView(
+                id=str(device.id),
+                name=device.display_name,
+                address=device.addresses[0].address if device.addresses else None,
+                mac_address=device.mac_address,
+                status=device.status,
+                sources=sorted({source_names.get(item.source_id, "Unknown") for item in linked}),
+                observations=len(linked),
+                linked=True,
+                last_seen_at=device.last_seen_at,
+            )
+        )
+    for identity, grouped in unlinked_groups.items():
+        recent = max(grouped, key=lambda item: item.last_seen_at)
+        result.append(
+            NetworkAssetView(
+                id=f"observation:{identity}",
+                name=recent.name,
+                address=next((item.address for item in grouped if item.address), None),
+                mac_address=next((item.mac_address for item in grouped if item.mac_address), None),
+                status="needs_review",
+                sources=sorted({source_names.get(item.source_id, "Unknown") for item in grouped}),
+                observations=len(grouped),
+                linked=False,
+                last_seen_at=max(item.last_seen_at for item in grouped),
+            )
+        )
+    return sorted(result, key=lambda item: (not item.linked, item.name.lower()))
 
 
 @router.post("", response_model=SourceView, status_code=201)

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     sentinel_environment: Literal["development", "test", "production"] = "development"
-    sentinel_version: str = "0.39.1"
+    sentinel_version: str = "0.40.0"
     database_url: str | None = None
     redis_url: str | None = None
     session_secret: SecretStr | None = None
