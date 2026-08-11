@@ -14,7 +14,7 @@ export function ActionsPage({
 }) {
   const [localItems, setLocalItems] = useState(items);
   const [busy, setBusy] = useState("");
-  const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "release" | "">("");
+  const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "release" | "dismiss" | "">("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -49,9 +49,9 @@ export function ActionsPage({
       : groupBy === "severity"
         ? item.severity
         : groupBy === "readiness"
-          ? item.automation_ready ? "Playbook ready" : "Manual review"
+          ? item.plan ? "Playbook history" : item.automation_ready ? "Playbook ready" : "Manual review"
         : item.plan?.status || (item.automation_ready ? "ready" : "locked");
-    const order = ["Playbook ready", "Manual review"];
+    const order = ["Playbook ready", "Manual review", "Playbook history"];
     return [...new Set(visible.map(key))].sort((a,b) => order.indexOf(a)-order.indexOf(b) || a.localeCompare(b)).map(value => [value, visible.filter(item => key(item) === value)] as [string, ActionItem[]]);
   }, [visible, groupBy]);
   const summary = useMemo(() => ({
@@ -67,11 +67,12 @@ export function ActionsPage({
     setLocalItems(current => current.map(item => item.finding_id === findingId ? {...item, ...change} : item));
   }
 
-  const actionable = visible.filter(item => item.automation_ready && (!item.plan || ["draft", "approved"].includes(item.plan.status)));
+  const selectableVisible = visible.filter(item => !item.plan || ["draft", "approved"].includes(item.plan.status));
   const selectedItems = localItems.filter(item => selected.has(item.finding_id));
   const selectedBuildable = selectedItems.filter(item => item.automation_ready && !item.plan);
   const selectedDrafts = selectedItems.filter(item => item.plan?.status === "draft");
   const selectedApproved = selectedItems.filter(item => item.plan?.status === "approved");
+  const selectedDismissible = selectedItems.filter(item => !item.plan && !item.automation_ready);
 
   function toggle(findingId: string) {
     setSelected(current => {
@@ -82,7 +83,7 @@ export function ActionsPage({
   }
 
   function selectVisible() {
-    setSelected(new Set(actionable.map(item => item.finding_id)));
+    setSelected(new Set(selectableVisible.map(item => item.finding_id)));
   }
 
   async function build(item: ActionItem) {
@@ -170,6 +171,28 @@ export function ActionsPage({
     void refresh();
   }
 
+  async function dismissSelected() {
+    if (!selectedDismissible.length || !window.confirm(
+      `Dismiss ${selectedDismissible.length} findings as accepted risk for now? They will leave the active Action Center but remain in vulnerability history.`
+    )) return;
+    setBulkBusy("dismiss");
+    try {
+      const ids = selectedDismissible.map(item => item.finding_id);
+      await api.dismissActions(ids, csrf);
+      setLocalItems(current => current.filter(item => !ids.includes(item.finding_id)));
+      setSelected(new Set());
+      void refresh();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Unable to dismiss findings";
+      setErrors(current => ({
+        ...current,
+        ...Object.fromEntries(selectedDismissible.map(item => [item.finding_id, message]))
+      }));
+    } finally {
+      setBulkBusy("");
+    }
+  }
+
   async function transition(item: ActionItem, kind: "cancel" | "retry" | "archive") {
     if (!item.plan) return;
     const prompts = {
@@ -195,12 +218,12 @@ export function ActionsPage({
     }
   }
 
-  async function triage(item: ActionItem, status: "investigating" | "false_positive") {
-    if (status === "false_positive" && !window.confirm(`Dismiss ${item.cve_id} as a false positive?`)) return;
+  async function triage(item: ActionItem, status: "investigating" | "accepted_risk") {
+    if (status === "accepted_risk" && !window.confirm(`Dismiss ${item.cve_id} as accepted risk for now?`)) return;
     setBusy(item.finding_id);
     try {
       await api.updateFinding(item.finding_id, status, null, csrf);
-      if (status === "false_positive") setLocalItems(current => current.filter(value => value.finding_id !== item.finding_id));
+      if (status === "accepted_risk") setLocalItems(current => current.filter(value => value.finding_id !== item.finding_id));
       else replaceItem(item.finding_id, {finding_status: status});
       void refresh();
     } catch (reason) {
@@ -224,12 +247,13 @@ export function ActionsPage({
       <b>{visible.length} of {localItems.length}</b>
     </div>
     <div className="panel bulk-actions">
-      <div><b>{selected.size} selected</b><span>Select eligible findings to build or approve several package plans together.</span></div>
-      <button onClick={selectVisible} disabled={!actionable.length}>Select visible ({actionable.length})</button>
+      <div><b>{selected.size} selected</b><span>Build actionable playbooks or dismiss non-actionable findings as accepted risk.</span></div>
+      <button onClick={selectVisible} disabled={!selectableVisible.length}>Select visible ({selectableVisible.length})</button>
       <button onClick={() => setSelected(new Set())} disabled={!selected.size}>Clear</button>
       <button className="bulk-primary" onClick={() => void buildSelected()} disabled={!selectedBuildable.length || !!bulkBusy}>{bulkBusy === "build" ? "Building…" : `Build selected (${selectedBuildable.length})`}</button>
       <button className="bulk-primary" onClick={() => void approveSelected()} disabled={!selectedDrafts.length || !!bulkBusy}>{bulkBusy === "approve" ? "Approving…" : `Approve selected (${selectedDrafts.length})`}</button>
       <button className="bulk-danger" onClick={() => void releaseSelected()} disabled={!selectedApproved.length || !!bulkBusy}>{bulkBusy === "release" ? "Releasing…" : `Run selected (${selectedApproved.length})`}</button>
+      <button className="secondary-action" onClick={() => void dismissSelected()} disabled={!selectedDismissible.length || !!bulkBusy}>{bulkBusy === "dismiss" ? "Dismissing…" : `Dismiss selected (${selectedDismissible.length})`}</button>
     </div>
     {localItems.length === 0
       ? <div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>
@@ -272,9 +296,9 @@ function ActionCard({
   build: (item: ActionItem) => Promise<void>;
   approve: (item: ActionItem) => Promise<void>;
   transition: (item: ActionItem, kind: "cancel" | "retry" | "archive") => Promise<void>;
-  triage: (item: ActionItem, status: "investigating" | "false_positive") => Promise<void>;
+  triage: (item: ActionItem, status: "investigating" | "accepted_risk") => Promise<void>;
 }) {
-  const selectable = item.automation_ready && (!item.plan || ["draft", "approved"].includes(item.plan.status));
+  const selectable = !item.plan || ["draft", "approved"].includes(item.plan.status);
   return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""} ${selected ? "selected" : ""}`}>
     <div className="action-priority"><label className="action-select"><input type="checkbox" checked={selected} disabled={!selectable} onChange={() => toggle(item.finding_id)} /><span>Select</span></label><strong>{item.priority}</strong><small>PRIORITY</small></div>
     <div>
@@ -295,7 +319,7 @@ function ActionCard({
         : item.plan.status === "draft"
           ? <button className="primary compact" onClick={() => void approve(item)} disabled={busy === item.plan.id}>{busy === item.plan.id ? "Approving…" : "Review & approve"}</button>
           : <button disabled>{item.plan.status === "approved" ? "Select to run" : item.plan.status === "dispatched" ? "Executing" : item.plan.status}</button>}
-      {!item.plan && !item.automation_ready && <><button onClick={()=>void triage(item,"investigating")} disabled={busy===item.finding_id}>Investigate</button><button className="secondary-action" onClick={()=>void triage(item,"false_positive")} disabled={busy===item.finding_id}>Dismiss</button></>}
+      {!item.plan && !item.automation_ready && <><button onClick={()=>void triage(item,"investigating")} disabled={busy===item.finding_id}>Investigate</button><button className="secondary-action" onClick={()=>void triage(item,"accepted_risk")} disabled={busy===item.finding_id}>Dismiss for now</button></>}
       {item.plan && ["approved", "queued"].includes(item.plan.status) && <button className="secondary-action" onClick={() => void transition(item,"cancel")} disabled={busy === item.plan.id}>Cancel</button>}
       {item.plan?.status === "failed" && <button onClick={() => void transition(item,"retry")} disabled={busy === item.plan.id}>Retry</button>}
       {item.plan && ["completed", "failed", "canceled"].includes(item.plan.status) && <button className="secondary-action" onClick={() => void transition(item,"archive")} disabled={busy === item.plan.id}>Archive</button>}

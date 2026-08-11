@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
@@ -67,6 +67,10 @@ class ActionItemView(BaseModel):
     plan: RemediationPlanView | None
 
 
+class BulkDismissRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
 def priority(finding: VulnerabilityFinding, criticality: str | None) -> int:
     score = {"critical": 40, "high": 30, "medium": 20, "low": 10}.get(finding.severity, 5)
     if finding.known_exploited:
@@ -121,7 +125,15 @@ async def list_actions(
             .outerjoin(Device, Device.id == VulnerabilityFinding.device_id)
             .outerjoin(Agent, (Agent.device_id == Device.id) & Agent.revoked_at.is_(None))
             .outerjoin(RemediationPlan, RemediationPlan.finding_id == VulnerabilityFinding.id)
-            .where(VulnerabilityFinding.status.in_(("open", "investigating")))
+            .where(
+                or_(
+                    VulnerabilityFinding.status.in_(("open", "investigating")),
+                    and_(
+                        RemediationPlan.id.is_not(None),
+                        RemediationPlan.status != "archived",
+                    ),
+                )
+            )
         )
     ).all()
     items = []
@@ -181,6 +193,44 @@ async def list_actions(
             )
         )
     return sorted(items, key=lambda item: (-item.priority, item.cve_id, item.address))
+
+
+@router.post("/dismiss", status_code=204)
+async def dismiss_actions(
+    payload: BulkDismissRequest,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    plan_finding_ids = set(
+        await database.scalars(
+            select(RemediationPlan.finding_id).where(RemediationPlan.finding_id.in_(payload.ids))
+        )
+    )
+    findings = list(
+        await database.scalars(
+            select(VulnerabilityFinding).where(
+                VulnerabilityFinding.id.in_(payload.ids),
+                VulnerabilityFinding.status.in_(("open", "investigating")),
+            )
+        )
+    )
+    dismissed = [finding for finding in findings if finding.id not in plan_finding_ids]
+    if not dismissed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "no selected findings are eligible for dismissal",
+        )
+    for finding in dismissed:
+        finding.status = "accepted_risk"
+        database.add(
+            AuditEvent(
+                actor_user_id=auth[0].id,
+                action="vulnerability.finding.dismiss.bulk",
+                target_type="vulnerability_finding",
+                target_id=str(finding.id),
+            )
+        )
+    await database.commit()
 
 
 @router.post("/{finding_id}/plans", response_model=RemediationPlanView, status_code=201)

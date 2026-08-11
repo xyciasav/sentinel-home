@@ -169,6 +169,7 @@ export const api = {
   syncApplication: (id:string,csrfToken:string) => request<ApplicationIntegration>(`/api/v1/applications/${id}/sync`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
   deleteApplication: (id:string,csrfToken:string) => request<void>(`/api/v1/applications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":csrfToken}}),
   actionItems: () => request<ActionItem[]>("/api/v1/actions"),
+  dismissActions: (ids:string[],csrfToken:string) => request<void>("/api/v1/actions/dismiss",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({ids})}),
   buildRemediationPlan: (findingId:string,csrfToken:string) => request<RemediationPlan>(`/api/v1/actions/${findingId}/plans`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
   approveRemediationPlan: (planId:string,csrfToken:string) => request<RemediationPlan>(`/api/v1/actions/plans/${planId}/approve`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
   releaseRemediationPlan: (planId:string,csrfToken:string) => request<RemediationPlan>(`/api/v1/actions/plans/${planId}/release`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
