@@ -9,7 +9,7 @@ import sys
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.:_-]{0,254}$")
 VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.:~_-]{0,254}$")
-HELPER_VERSION = "0.3.0"
+HELPER_VERSION = "0.3.1"
 
 
 def installed_version(package: str) -> str:
@@ -41,28 +41,35 @@ def run() -> int:
     if current != expected:
         raise ValueError(f"installed version changed: expected {expected}, found {current}")
     environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
-    print("[1/4] Repairing any interrupted package configuration", flush=True)
-    subprocess.run(  # noqa: S603
-        ["/usr/bin/dpkg", "--configure", "--pending"],
-        env=environment,
-        timeout=900,
-        check=True,
-    )
-    print("[2/4] Refreshing package repositories", flush=True)
+    print("[1/5] Refreshing package repositories", flush=True)
     subprocess.run(  # noqa: S603
         ["/usr/bin/apt-get", "update"],
         env=environment,
         timeout=600,
         check=True,
     )
-    print(f"[3/4] Upgrading {package} and required dependencies", flush=True)
+    print("[2/5] Configuring any unpacked packages", flush=True)
+    subprocess.run(  # noqa: S603
+        ["/usr/bin/dpkg", "--configure", "--pending"],
+        env=environment,
+        timeout=900,
+        check=False,
+    )
+    print("[3/5] Repairing interrupted package dependencies", flush=True)
+    subprocess.run(  # noqa: S603
+        ["/usr/bin/apt-get", "--fix-broken", "install", "--assume-yes"],
+        env=environment,
+        timeout=900,
+        check=True,
+    )
+    print(f"[4/5] Upgrading {package} and required dependencies", flush=True)
     subprocess.run(  # noqa: S603
         ["/usr/bin/apt-get", "install", "--only-upgrade", "--assume-yes", package],
         env=environment,
         timeout=900,
         check=True,
     )
-    print("[4/4] Verifying installed package version", flush=True)
+    print("[5/5] Verifying installed package version", flush=True)
     updated = installed_version(package)
     if updated == current:
         raise RuntimeError(

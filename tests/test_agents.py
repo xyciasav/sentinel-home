@@ -27,7 +27,7 @@ def test_remediation_helper_has_no_shell_execution_surface() -> None:
     assert '["/usr/bin/apt-get", "update"]' in source
     assert 'f"{package}={target}"' not in source
     assert '"--only-upgrade", "--assume-yes", package' in source
-    assert 'HELPER_VERSION = "0.3.0"' in source
+    assert 'HELPER_VERSION = "0.3.1"' in source
 
 
 def test_container_helper_has_fixed_read_only_docker_commands() -> None:
