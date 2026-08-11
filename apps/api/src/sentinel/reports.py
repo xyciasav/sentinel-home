@@ -1,8 +1,11 @@
+import csv
+import io
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,7 @@ from sentinel.auth import authenticated_session
 from sentinel.database import get_session
 from sentinel.models import (
     Agent,
+    ContainerEvent,
     Device,
     Incident,
     MonitorResult,
@@ -76,6 +80,196 @@ class ReportView(BaseModel):
     package_vulnerabilities: int
     remediation_status: dict[str, int]
     devices: list[DeviceSecurityView]
+
+
+class DailyTrendView(BaseModel):
+    date: str
+    checks: int
+    successful: int
+    uptime_percent: float | None
+    average_response_ms: int | None
+    incidents: int
+    expected_incidents: int
+    network_changes: int
+    container_alerts: int
+
+
+class HistoricalReportView(BaseModel):
+    generated_at: datetime
+    days: int
+    start_at: datetime
+    end_at: datetime
+    summary: WindowView
+    incidents: int
+    expected_incidents: int
+    network_changes: int
+    container_alerts: int
+    daily: list[DailyTrendView]
+    services: list[ServiceView]
+
+
+async def historical_report(database: AsyncSession, days: int) -> HistoricalReportView:
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    monitor_rows = (
+        await database.execute(
+            select(
+                func.date(MonitorResult.checked_at),
+                func.count(MonitorResult.id),
+                func.coalesce(func.sum(case((MonitorResult.success.is_(True), 1), else_=0)), 0),
+                func.avg(MonitorResult.response_ms),
+            )
+            .where(MonitorResult.checked_at >= since)
+            .group_by(func.date(MonitorResult.checked_at))
+        )
+    ).all()
+    incident_rows = (
+        await database.execute(
+            select(
+                func.date(Incident.started_at),
+                func.count(Incident.id),
+                func.coalesce(func.sum(case((Incident.expected.is_(True), 1), else_=0)), 0),
+            )
+            .where(Incident.started_at >= since)
+            .group_by(func.date(Incident.started_at))
+        )
+    ).all()
+    change_rows = (
+        await database.execute(
+            select(func.date(NetworkChange.detected_at), func.count(NetworkChange.id))
+            .where(NetworkChange.detected_at >= since)
+            .group_by(func.date(NetworkChange.detected_at))
+        )
+    ).all()
+    container_rows = (
+        await database.execute(
+            select(func.date(ContainerEvent.occurred_at), func.count(ContainerEvent.id))
+            .where(ContainerEvent.occurred_at >= since)
+            .group_by(func.date(ContainerEvent.occurred_at))
+        )
+    ).all()
+    monitors = {str(row[0]): row for row in monitor_rows}
+    incidents = {str(row[0]): row for row in incident_rows}
+    changes = {str(row[0]): int(row[1]) for row in change_rows}
+    containers = {str(row[0]): int(row[1]) for row in container_rows}
+    daily = []
+    for offset in range(days - 1, -1, -1):
+        key = (now - timedelta(days=offset)).date().isoformat()
+        monitor = monitors.get(key)
+        incident = incidents.get(key)
+        checks, successful = (int(monitor[1]), int(monitor[2])) if monitor else (0, 0)
+        daily.append(
+            DailyTrendView(
+                date=key,
+                checks=checks,
+                successful=successful,
+                uptime_percent=percentage(successful, checks),
+                average_response_ms=round(float(monitor[3]))
+                if monitor and monitor[3] is not None
+                else None,
+                incidents=int(incident[1]) if incident else 0,
+                expected_incidents=int(incident[2]) if incident else 0,
+                network_changes=changes.get(key, 0),
+                container_alerts=containers.get(key, 0),
+            )
+        )
+    service_rows = (
+        await database.execute(
+            select(
+                ServiceMonitor.id,
+                ServiceMonitor.name,
+                ServiceMonitor.status,
+                func.count(MonitorResult.id),
+                func.coalesce(func.sum(case((MonitorResult.success.is_(True), 1), else_=0)), 0),
+                func.avg(MonitorResult.response_ms),
+            )
+            .outerjoin(
+                MonitorResult,
+                and_(
+                    MonitorResult.monitor_id == ServiceMonitor.id, MonitorResult.checked_at >= since
+                ),
+            )
+            .where(ServiceMonitor.enabled.is_(True))
+            .group_by(ServiceMonitor.id)
+            .order_by(ServiceMonitor.name)
+        )
+    ).all()
+    services = [
+        ServiceView(
+            id=row[0],
+            name=row[1],
+            status=row[2],
+            checks=int(row[3]),
+            uptime_percent=percentage(int(row[4]), int(row[3])),
+            average_response_ms=round(float(row[5])) if row[5] is not None else None,
+        )
+        for row in service_rows
+    ]
+    return HistoricalReportView(
+        generated_at=now,
+        days=days,
+        start_at=since,
+        end_at=now,
+        summary=await monitor_window(database, since),
+        incidents=sum(item.incidents for item in daily),
+        expected_incidents=sum(item.expected_incidents for item in daily),
+        network_changes=sum(item.network_changes for item in daily),
+        container_alerts=sum(item.container_alerts for item in daily),
+        daily=daily,
+        services=services,
+    )
+
+
+@router.get("/history", response_model=HistoricalReportView)
+async def history_report(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+) -> HistoricalReportView:
+    return await historical_report(database, days)
+
+
+@router.get("/history.csv")
+async def history_csv(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+) -> StreamingResponse:
+    report = await historical_report(database, days)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "date",
+            "checks",
+            "successful",
+            "uptime_percent",
+            "average_response_ms",
+            "incidents",
+            "expected_incidents",
+            "network_changes",
+            "container_alerts",
+        ]
+    )
+    for item in report.daily:
+        writer.writerow(
+            [
+                item.date,
+                item.checks,
+                item.successful,
+                item.uptime_percent or "",
+                item.average_response_ms or "",
+                item.incidents,
+                item.expected_incidents,
+                item.network_changes,
+                item.container_alerts,
+            ]
+        )
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="sentinel-history-{days}d.csv"'},
+    )
 
 
 async def monitor_window(database: AsyncSession, since: datetime) -> WindowView:
