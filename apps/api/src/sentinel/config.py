@@ -9,12 +9,13 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     sentinel_environment: Literal["development", "test", "production"] = "development"
-    sentinel_version: str = "0.35.0"
+    sentinel_version: str = "0.36.0"
     database_url: str | None = None
     redis_url: str | None = None
     session_secret: SecretStr | None = None
     data_encryption_key: SecretStr | None = None
     detailed_retention_days: int = Field(default=30, ge=1, le=365)
+    source_sync_interval_seconds: int = Field(default=900, ge=60, le=86400)
     session_hours: int = Field(default=12, ge=1, le=168)
     cookie_secure: bool = False
     resend_api_key: SecretStr | None = None

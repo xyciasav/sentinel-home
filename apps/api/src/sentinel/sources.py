@@ -1,5 +1,7 @@
+import asyncio
 import ipaddress
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -14,7 +16,8 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 from sentinel.auth import authenticated_session, csrf_protected_session
-from sentinel.database import get_session
+from sentinel.config import get_settings
+from sentinel.database import get_session, get_session_factory
 from sentinel.models import (
     AuditEvent,
     Device,
@@ -28,6 +31,7 @@ from sentinel.models import (
 from sentinel.security import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/api/v1/sources", tags=["inventory sources"])
+logger = logging.getLogger(__name__)
 
 
 class SourceInput(BaseModel):
@@ -193,6 +197,80 @@ async def source_view(database: AsyncSession, source: InventorySource) -> Source
     )
 
 
+async def synchronize_source(database: AsyncSession, source: InventorySource) -> None:
+    try:
+        incoming = await fetch_home_assistant(source)
+        existing = {
+            item.external_id: item
+            for item in await database.scalars(
+                select(SourceDevice).where(SourceDevice.source_id == source.id)
+            )
+        }
+        now = datetime.now(UTC)
+        for values in incoming:
+            item = existing.get(values["external_id"])
+            if item is None:
+                item = SourceDevice(source_id=source.id, **values)
+                database.add(item)
+            else:
+                previous_address = item.address
+                for key, value in values.items():
+                    if key == "address" and value is None:
+                        continue
+                    setattr(item, key, value)
+                new_address = values.get("address")
+                if (
+                    item.imported_device_id
+                    and new_address
+                    and new_address != previous_address
+                    and not await database.scalar(
+                        select(DeviceAddress.id).where(
+                            DeviceAddress.address == new_address,
+                            DeviceAddress.device_id != item.imported_device_id,
+                        )
+                    )
+                ):
+                    imported_address = await database.scalar(
+                        select(DeviceAddress).where(
+                            DeviceAddress.device_id == item.imported_device_id,
+                            DeviceAddress.address == previous_address,
+                        )
+                    )
+                    if imported_address is not None:
+                        imported_address.address = new_address
+                        imported_address.last_seen_at = now
+            item.last_seen_at = now
+        source.last_sync_at = now
+        source.last_sync_status = "ok"
+        source.last_sync_error = None
+        await database.commit()
+    except (httpx.HTTPError, OSError, RuntimeError, ValueError, WebSocketException) as error:
+        source.last_sync_at = datetime.now(UTC)
+        source.last_sync_status = "failed"
+        source.last_sync_error = str(error)[:500]
+        await database.commit()
+
+
+async def source_sync_loop() -> None:
+    interval = get_settings().source_sync_interval_seconds
+    while True:
+        try:
+            async with get_session_factory()() as database:
+                source_ids = list(
+                    await database.scalars(
+                        select(InventorySource.id).where(InventorySource.enabled.is_(True))
+                    )
+                )
+            for source_id in source_ids:
+                async with get_session_factory()() as database:
+                    source = await database.get(InventorySource, source_id)
+                    if source is not None and source.enabled:
+                        await synchronize_source(database, source)
+        except Exception:
+            logger.exception("inventory source synchronization cycle failed")
+        await asyncio.sleep(interval)
+
+
 @router.get("", response_model=list[SourceView])
 async def list_sources(
     database: Annotated[AsyncSession, Depends(get_session)],
@@ -236,33 +314,7 @@ async def sync_source(
     source = await database.get(InventorySource, source_id)
     if source is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "inventory source not found")
-    try:
-        incoming = await fetch_home_assistant(source)
-        existing = {
-            item.external_id: item
-            for item in await database.scalars(
-                select(SourceDevice).where(SourceDevice.source_id == source.id)
-            )
-        }
-        now = datetime.now(UTC)
-        for values in incoming:
-            item = existing.get(values["external_id"])
-            if item is None:
-                item = SourceDevice(source_id=source.id, **values)
-                database.add(item)
-            else:
-                for key, value in values.items():
-                    setattr(item, key, value)
-            item.last_seen_at = now
-        source.last_sync_at = now
-        source.last_sync_status = "ok"
-        source.last_sync_error = None
-        await database.commit()
-    except (httpx.HTTPError, OSError, RuntimeError, ValueError, WebSocketException) as error:
-        source.last_sync_at = datetime.now(UTC)
-        source.last_sync_status = "failed"
-        source.last_sync_error = str(error)[:500]
-        await database.commit()
+    await synchronize_source(database, source)
     return await source_view(database, source)
 
 
