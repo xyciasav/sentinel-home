@@ -1,6 +1,6 @@
 import pytest
 from fastapi import HTTPException
-from sentinel.sources import parse_pihole_devices, safe_base_url, websocket_url
+from sentinel.sources import parse_pihole_devices, pihole_api_base, safe_base_url, websocket_url
 
 
 @pytest.mark.parametrize(
@@ -26,6 +26,10 @@ def test_safe_base_url_rejects_unsafe_destinations(value: str) -> None:
 
 def test_websocket_url_uses_home_assistant_endpoint() -> None:
     assert websocket_url("https://homeassistant.local") == "wss://homeassistant.local/api/websocket"
+
+
+def test_pihole_login_url_is_normalized_to_api_origin() -> None:
+    assert pihole_api_base("http://pi.hole/admin/login.php") == "http://pi.hole"
 
 
 def test_parse_pihole_devices_prefers_recent_private_address() -> None:

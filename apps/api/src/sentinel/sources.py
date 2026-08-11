@@ -100,6 +100,11 @@ def websocket_url(base_url: str) -> str:
     )
 
 
+def pihole_api_base(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    return urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")).rstrip("/")
+
+
 async def ws_command(socket, command_id: int, command_type: str) -> list[dict]:
     await socket.send(json.dumps({"id": command_id, "type": command_type}))
     response = json.loads(await socket.recv())
@@ -176,28 +181,32 @@ async def fetch_home_assistant(source: InventorySource) -> list[dict]:
 
 async def fetch_pihole(source: InventorySource) -> tuple[list[dict], dict]:
     password = decrypt_secret(source.credential_encrypted)
+    base_url = pihole_api_base(source.base_url)
     async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
-        authentication = await client.post(
-            f"{source.base_url}/api/auth", json={"password": password}
-        )
+        authentication = await client.post(f"{base_url}/api/auth", json={"password": password})
         authentication.raise_for_status()
-        session = authentication.json().get("session") or {}
+        try:
+            session = authentication.json().get("session") or {}
+        except ValueError as error:
+            raise RuntimeError(
+                "Pi-hole did not return API data. Use its server URL, not /admin/login.php."
+            ) from error
         sid = session.get("sid")
         if not session.get("valid") or not sid:
             raise RuntimeError("Pi-hole rejected the application password")
         headers = {"X-FTL-SID": sid, "Accept": "application/json"}
         devices_response, summary_response, blocking_response = await asyncio.gather(
             client.get(
-                f"{source.base_url}/api/network/devices",
+                f"{base_url}/api/network/devices",
                 headers=headers,
                 params={"max_devices": 1000, "max_addresses": 10},
             ),
-            client.get(f"{source.base_url}/api/stats/summary", headers=headers),
-            client.get(f"{source.base_url}/api/dns/blocking", headers=headers),
+            client.get(f"{base_url}/api/stats/summary", headers=headers),
+            client.get(f"{base_url}/api/dns/blocking", headers=headers),
         )
         for response in (devices_response, summary_response, blocking_response):
             response.raise_for_status()
-        await client.delete(f"{source.base_url}/api/auth", headers=headers)
+        await client.delete(f"{base_url}/api/auth", headers=headers)
     raw_summary = summary_response.json()
     summary = {
         "blocking": bool(blocking_response.json().get("blocking")),
@@ -271,6 +280,7 @@ async def source_view(database: AsyncSession, source: InventorySource) -> Source
 async def synchronize_source(database: AsyncSession, source: InventorySource) -> None:
     try:
         if source.kind == "pihole":
+            source.base_url = pihole_api_base(source.base_url)
             incoming, summary = await fetch_pihole(source)
             source.summary_json = json.dumps(summary)
         else:
@@ -315,6 +325,22 @@ async def synchronize_source(database: AsyncSession, source: InventorySource) ->
                         imported_address.address = new_address
                         imported_address.last_seen_at = now
             item.last_seen_at = now
+            if item.imported_device_id is None:
+                matched_device = None
+                if item.mac_address:
+                    matched_device = await database.scalar(
+                        select(Device).where(Device.mac_address == item.mac_address.lower())
+                    )
+                if matched_device is None and item.address:
+                    matched_address = await database.scalar(
+                        select(DeviceAddress).where(DeviceAddress.address == item.address)
+                    )
+                    if matched_address:
+                        matched_device = await database.get(Device, matched_address.device_id)
+                if matched_device is not None:
+                    item.imported_device_id = matched_device.id
+                    if not matched_device.mac_address and item.mac_address:
+                        matched_device.mac_address = item.mac_address.lower()
         source.last_sync_at = now
         source.last_sync_status = "ok"
         source.last_sync_error = None
@@ -364,7 +390,11 @@ async def create_source(
     source = InventorySource(
         name=payload.name.strip(),
         kind=payload.kind,
-        base_url=safe_base_url(str(payload.base_url)),
+        base_url=(
+            pihole_api_base(safe_base_url(str(payload.base_url)))
+            if payload.kind == "pihole"
+            else safe_base_url(str(payload.base_url))
+        ),
         credential_encrypted=encrypt_secret(payload.token.strip()),
     )
     database.add(source)
