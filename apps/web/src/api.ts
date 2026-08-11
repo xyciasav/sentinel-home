@@ -1,12 +1,13 @@
 export type User = { id: string; username: string; is_admin: boolean };
 export type AuthResult = { user: User; csrf_token: string; expires_at: string };
 export type Device = {
-  id: string; display_name: string; address: string; hostname: string | null;
+  id: string; display_name: string; address: string; hostname: string | null; mac_address:string|null;
   device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
   last_failure_reason: string | null; notes: string | null;
   alerts_muted_until: string | null; alert_mute_reason: string | null; notifications_muted:boolean;
 };
+export type DuplicateCandidate = {left:Device;right:Device;confidence:number;reasons:string[]};
 export type ServiceMonitor = {
   id:string; name:string; group_name:string|null; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
   expected_text:string|null; timeout_seconds:number; verify_tls:boolean; enabled:boolean;
@@ -82,6 +83,8 @@ export const api = {
       headers: { "X-CSRF-Token": csrfToken }
     }),
   devices: () => request<Device[]>("/api/v1/devices"),
+  duplicateDevices: () => request<DuplicateCandidate[]>("/api/v1/devices/duplicate-candidates"),
+  mergeDevice: (targetId:string,sourceId:string,csrfToken:string) => request<Device>(`/api/v1/devices/${targetId}/merge`,{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({source_id:sourceId})}),
   createDevice: (payload: Record<string, unknown>, csrfToken: string) =>
     request<Device>("/api/v1/devices", { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: JSON.stringify(payload) }),
   updateDevice: (id: string, payload: Record<string, unknown>, csrfToken: string) =>
