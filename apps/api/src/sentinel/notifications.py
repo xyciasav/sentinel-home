@@ -1,17 +1,17 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.config import get_settings
 from sentinel.database import get_session
-from sentinel.models import Incident, NotificationDelivery, Session, User
+from sentinel.models import AuditEvent, Device, Incident, NotificationDelivery, Session, User
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -26,6 +26,21 @@ class NotificationView(BaseModel):
     error: str | None
     created_at: datetime
     sent_at: datetime | None
+
+
+class DismissInput(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+class MuteInput(BaseModel):
+    minutes: int = Field(ge=0, le=10_080)
+    reason: str | None = Field(default=None, max_length=300)
+
+
+class MuteView(BaseModel):
+    device_id: uuid.UUID
+    alerts_muted_until: datetime | None
+    alert_mute_reason: str | None
 
 
 async def send_email(
@@ -45,6 +60,12 @@ async def send_email(
     )
     database.add(delivery)
     await database.flush()
+    if incident and incident.device_id:
+        device = await database.get(Device, incident.device_id)
+        if device and device.alerts_muted_until and device.alerts_muted_until > datetime.now(UTC):
+            delivery.status = "muted"
+            delivery.error = device.alert_mute_reason or "device alerts are muted"
+            return delivery
     if not settings.email_alerts_configured:
         delivery.error = "Resend email settings are not configured"
         return delivery
@@ -89,7 +110,10 @@ async def list_notifications(
 ) -> list[NotificationDelivery]:
     return list(
         await database.scalars(
-            select(NotificationDelivery).order_by(NotificationDelivery.created_at.desc()).limit(200)
+            select(NotificationDelivery)
+            .where(NotificationDelivery.dismissed_at.is_(None))
+            .order_by(NotificationDelivery.created_at.desc())
+            .limit(200)
         )
     )
 
@@ -107,3 +131,58 @@ async def test_notification(
     )
     await database.commit()
     return delivery
+
+
+@router.post("/dismiss", status_code=204)
+async def dismiss_notifications(
+    payload: DismissInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    now = datetime.now(UTC)
+    await database.execute(
+        update(NotificationDelivery)
+        .where(NotificationDelivery.id.in_(set(payload.ids)))
+        .values(dismissed_at=now)
+    )
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="notification.dismiss.bulk",
+            target_type="notification_delivery",
+            target_id=f"{len(set(payload.ids))} selected",
+        )
+    )
+    await database.commit()
+
+
+@router.post("/devices/{device_id}/mute", response_model=MuteView)
+async def mute_device_alerts(
+    device_id: uuid.UUID,
+    payload: MuteInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> MuteView:
+    device = await database.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
+    device.alerts_muted_until = (
+        datetime.now(UTC) + timedelta(minutes=payload.minutes) if payload.minutes else None
+    )
+    device.alert_mute_reason = (
+        payload.reason.strip() if payload.minutes and payload.reason else None
+    )
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="device.alerts.mute" if payload.minutes else "device.alerts.unmute",
+            target_type="device",
+            target_id=str(device.id),
+        )
+    )
+    await database.commit()
+    return MuteView(
+        device_id=device.id,
+        alerts_muted_until=device.alerts_muted_until,
+        alert_mute_reason=device.alert_mute_reason,
+    )

@@ -5,6 +5,7 @@ export type Device = {
   device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
   last_failure_reason: string | null; notes: string | null;
+  alerts_muted_until: string | null; alert_mute_reason: string | null;
 };
 export type ServiceMonitor = {
   id:string; name:string; group_name:string|null; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
@@ -95,6 +96,8 @@ export const api = {
   notifications: () => request<Notification[]>("/api/v1/notifications"),
   testNotification: (csrfToken:string) =>
     request<Notification>("/api/v1/notifications/test", { method:"POST", headers:{"X-CSRF-Token":csrfToken} }),
+  dismissNotifications: (ids:string[],csrfToken:string) => request<void>("/api/v1/notifications/dismiss",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({ids})}),
+  muteDeviceAlerts: (deviceId:string,minutes:number,reason:string,csrfToken:string) => request<{device_id:string;alerts_muted_until:string|null;alert_mute_reason:string|null}>(`/api/v1/notifications/devices/${deviceId}/mute`,{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({minutes,reason})}),
   latestDiscovery: () => request<DiscoveryRun|null>("/api/v1/discovery/latest"),
   runDiscovery: (subnet:string, csrfToken:string) =>
     request<DiscoveryRun>("/api/v1/discovery/runs", { method:"POST", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify({subnet}) }),

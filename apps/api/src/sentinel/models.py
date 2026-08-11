@@ -84,6 +84,8 @@ class Device(Base):
     last_failure_reason: Mapped[str | None] = mapped_column(String(100))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alerts_muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alert_mute_reason: Mapped[str | None] = mapped_column(String(300))
     addresses: Mapped[list["DeviceAddress"]] = relationship(cascade="all, delete-orphan")
     service_monitors: Mapped[list["ServiceMonitor"]] = relationship(
         back_populates="device", cascade="all, delete-orphan"
@@ -197,6 +199,7 @@ class NotificationDelivery(Base):
     error: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DiscoveryRun(Base):
