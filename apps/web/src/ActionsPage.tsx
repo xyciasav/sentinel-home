@@ -1,10 +1,158 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActionItem, api } from "./api";
 
-export function ActionsPage({items,csrf,refresh}:{items:ActionItem[];csrf:string;refresh:()=>Promise<void>}) {
-  const [busy,setBusy]=useState(""),[error,setError]=useState("");
-  useEffect(()=>{if(error)window.alert(error)},[error]);
-  async function build(item:ActionItem){setBusy(item.finding_id);setError("");try{await api.buildRemediationPlan(item.finding_id,csrf);await refresh()}catch(reason){setError(reason instanceof Error?reason.message:"Unable to build plan")}finally{setBusy("")}}
-  async function approve(item:ActionItem){if(!item.plan||!window.confirm(`Approve upgrading ${item.plan.package_name} from ${item.plan.installed_version} to ${item.plan.target_version} on ${item.device_name||item.address}? This records approval but does not execute yet.`))return;setBusy(item.plan.id);setError("");try{await api.approveRemediationPlan(item.plan.id,csrf);await refresh()}catch(reason){setError(reason instanceof Error?reason.message:"Unable to approve plan")}finally{setBusy("")}}
-  return <><header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with exact package evidence and an auditable approval gate.</p></div></header><div className="notice panel"><b>Execution safety:</b> Approved plans are persisted and audited, but remain non-executing until the restricted root helper and signed agent delivery protocol are installed.</div>{error&&<div className="error storage-error">{error}</div>}{items.length===0?<div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>:<div className="action-list">{items.map(item=><article className={`panel action-item ${item.known_exploited?"urgent":""}`} key={item.finding_id}><div className="action-priority"><strong>{item.priority}</strong><small>PRIORITY</small></div><div><div className="action-title"><span className={`severity ${item.severity}`}>{item.severity}</span><h2>{item.cve_id}</h2>{item.known_exploited&&<span className="kev-badge">CISA KEV</span>}</div><p><b>{item.device_name||item.address}</b> · {item.address} · Device criticality: {item.device_criticality||"unassigned"}</p>{item.affected_package&&<p className="package-evidence"><b>{item.affected_package}</b> {item.installed_version||"unknown"} → {item.fixed_version||"fix not published"}</p>}<p>{item.required_action||"Review the vendor advisory and package evidence."}{item.action_due&&` Due ${item.action_due}.`}</p>{item.plan?<div className="automation-locked"><b>Plan {item.plan.status}</b><span>{item.plan.operation}: {item.plan.package_name} {item.plan.installed_version} → {item.plan.target_version}</span></div>:<div className="automation-locked"><b>{item.automation_ready?"Plan available":"Automation locked"}</b><span>{item.automation_blocker}</span></div>}</div><div className="action-state"><span>{item.finding_status.replace("_"," ")}</span>{!item.plan?<button onClick={()=>void build(item)} disabled={!item.automation_ready||busy===item.finding_id}>{busy===item.finding_id?"Building…":"Build playbook"}</button>:item.plan.status==="draft"?<button className="primary compact" onClick={()=>void approve(item)} disabled={busy===item.plan.id}>{busy===item.plan.id?"Approving…":"Review & approve"}</button>:<button disabled>{item.plan.status==="approved"?"Awaiting executor":item.plan.status}</button>}</div></article>)}</div>}</>;
+const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
+
+export function ActionsPage({
+  items,
+  csrf,
+  refresh
+}: {
+  items: ActionItem[];
+  csrf: string;
+  refresh: () => Promise<void>;
+}) {
+  const [localItems, setLocalItems] = useState(items);
+  const [busy, setBusy] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
+  const [severity, setSeverity] = useState("all");
+  const [device, setDevice] = useState("all");
+  const [readiness, setReadiness] = useState("all");
+  const [planStatus, setPlanStatus] = useState("all");
+  const [groupBy, setGroupBy] = useState("none");
+
+  useEffect(() => setLocalItems(items), [items]);
+
+  const devices = useMemo(
+    () => [...new Set(localItems.map(item => item.device_name || item.address))].sort(),
+    [localItems]
+  );
+  const visible = useMemo(
+    () => localItems.filter(item => {
+      const text = `${item.cve_id} ${item.title} ${item.device_name || ""} ${item.address} ${item.affected_package || ""}`.toLowerCase();
+      const state = item.plan?.status || (item.automation_ready ? "ready" : "locked");
+      return (!query || text.includes(query.toLowerCase()))
+        && (severity === "all" || item.severity === severity)
+        && (device === "all" || (item.device_name || item.address) === device)
+        && (readiness === "all" || (readiness === "ready") === item.automation_ready)
+        && (planStatus === "all" || state === planStatus);
+    }),
+    [localItems, query, severity, device, readiness, planStatus]
+  );
+  const groups = useMemo(() => {
+    if (groupBy === "none") return [["All actions", visible] as [string, ActionItem[]]];
+    const key = (item: ActionItem) => groupBy === "device"
+      ? item.device_name || item.address
+      : groupBy === "severity"
+        ? item.severity
+        : item.plan?.status || (item.automation_ready ? "ready" : "locked");
+    return [...new Set(visible.map(key))].sort().map(value => [value, visible.filter(item => key(item) === value)] as [string, ActionItem[]]);
+  }, [visible, groupBy]);
+
+  function replaceItem(findingId: string, change: Partial<ActionItem>) {
+    setLocalItems(current => current.map(item => item.finding_id === findingId ? {...item, ...change} : item));
+  }
+
+  async function build(item: ActionItem) {
+    setBusy(item.finding_id);
+    setErrors(current => ({...current, [item.finding_id]: ""}));
+    try {
+      const plan = await api.buildRemediationPlan(item.finding_id, csrf);
+      replaceItem(item.finding_id, {plan});
+      void refresh();
+    } catch (reason) {
+      setErrors(current => ({
+        ...current,
+        [item.finding_id]: reason instanceof Error ? reason.message : "Unable to build plan"
+      }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function approve(item: ActionItem) {
+    if (!item.plan || !window.confirm(
+      `Approve upgrading ${item.plan.package_name} from ${item.plan.installed_version} to ${item.plan.target_version} on ${item.device_name || item.address}? This records approval but does not execute yet.`
+    )) return;
+    setBusy(item.plan.id);
+    setErrors(current => ({...current, [item.finding_id]: ""}));
+    try {
+      const plan = await api.approveRemediationPlan(item.plan.id, csrf);
+      replaceItem(item.finding_id, {plan});
+      void refresh();
+    } catch (reason) {
+      setErrors(current => ({
+        ...current,
+        [item.finding_id]: reason instanceof Error ? reason.message : "Unable to approve plan"
+      }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return <>
+    <header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with exact package evidence and an auditable approval gate.</p></div></header>
+    <div className="notice panel"><b>Execution safety:</b> Approved plans enter the executor queue, but remain non-executing until the restricted root helper and signed agent protocol are installed.</div>
+    <div className="panel finding-filters action-filters">
+      <label>Search<input value={query} onChange={event => setQuery(event.target.value)} placeholder="CVE, package, or device" /></label>
+      <label>Severity<select value={severity} onChange={event => setSeverity(event.target.value)}><option value="all">All</option>{["critical", "high", "medium", "low", "unknown"].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Device<select value={device} onChange={event => setDevice(event.target.value)}><option value="all">All</option>{devices.map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Readiness<select value={readiness} onChange={event => setReadiness(event.target.value)}><option value="all">All</option><option value="ready">Playbook ready</option><option value="locked">Locked</option></select></label>
+      <label>Plan status<select value={planStatus} onChange={event => setPlanStatus(event.target.value)}><option value="all">All</option><option value="ready">Not built</option><option value="draft">Draft</option><option value="approved">Approved queue</option><option value="locked">Locked</option></select></label>
+      <label>Group by<select value={groupBy} onChange={event => setGroupBy(event.target.value)}><option value="none">None</option><option value="device">Device</option><option value="severity">Severity</option><option value="status">Plan status</option></select></label>
+      <b>{visible.length} of {localItems.length}</b>
+    </div>
+    {localItems.length === 0
+      ? <div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>
+      : visible.length === 0
+        ? <div className="empty-state panel"><h2>No matching actions</h2><p>Change or clear the filters above.</p></div>
+        : groups.map(([name, groupItems]) => <section className="finding-bucket" key={name}>
+          {groupBy !== "none" && <h2>{label(name)}<span>{groupItems.length}</span></h2>}
+          <div className="action-list">{groupItems.map(item => <ActionCard
+            key={item.finding_id}
+            item={item}
+            busy={busy}
+            error={errors[item.finding_id]}
+            build={build}
+            approve={approve}
+          />)}</div>
+        </section>)}
+  </>;
+}
+
+function ActionCard({
+  item,
+  busy,
+  error,
+  build,
+  approve
+}: {
+  item: ActionItem;
+  busy: string;
+  error?: string;
+  build: (item: ActionItem) => Promise<void>;
+  approve: (item: ActionItem) => Promise<void>;
+}) {
+  return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""}`}>
+    <div className="action-priority"><strong>{item.priority}</strong><small>PRIORITY</small></div>
+    <div>
+      <div className="action-title"><span className={`severity ${item.severity}`}>{item.severity}</span><h2>{item.cve_id}</h2>{item.known_exploited && <span className="kev-badge">CISA KEV</span>}</div>
+      <p><b>{item.device_name || item.address}</b> · {item.address} · Device criticality: {item.device_criticality || "unassigned"}</p>
+      {item.affected_package && <p className="package-evidence"><b>{item.affected_package}</b> {item.installed_version || "unknown"} → {item.fixed_version || "fix not published"}</p>}
+      <p>{item.required_action || "Review the vendor advisory and package evidence."}{item.action_due && ` Due ${item.action_due}.`}</p>
+      {item.plan
+        ? <div className="automation-locked"><b>Plan {item.plan.status}</b><span>{item.plan.operation}: {item.plan.package_name} {item.plan.installed_version} → {item.plan.target_version}</span></div>
+        : <div className="automation-locked"><b>{item.automation_ready ? "Plan available" : "Automation locked"}</b><span>{item.automation_blocker}</span></div>}
+      {error && <div className="error action-error">{error}</div>}
+    </div>
+    <div className="action-state">
+      <span>{item.finding_status.replace("_", " ")}</span>
+      {!item.plan
+        ? <button onClick={() => void build(item)} disabled={!item.automation_ready || busy === item.finding_id}>{busy === item.finding_id ? "Building…" : "Build playbook"}</button>
+        : item.plan.status === "draft"
+          ? <button className="primary compact" onClick={() => void approve(item)} disabled={busy === item.plan.id}>{busy === item.plan.id ? "Approving…" : "Review & approve"}</button>
+          : <button disabled>{item.plan.status === "approved" ? "Queued for executor" : item.plan.status}</button>}
+    </div>
+  </article>;
 }
