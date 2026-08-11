@@ -77,8 +77,15 @@ def priority(finding: VulnerabilityFinding, criticality: str | None) -> int:
 
 
 def automation_blocker(
-    finding: VulnerabilityFinding, agent: Agent | None, candidate_version: str | None
+    finding: VulnerabilityFinding,
+    agent: Agent | None,
+    candidate_version: str | None,
+    agent_applicable: bool = True,
 ) -> str:
+    if not agent_applicable:
+        return (
+            "Agent automation is not applicable to this appliance; review the vendor update path."
+        )
     if finding.detection_method != "osv-agent-package":
         return (
             "This is a network/service finding, so there is no verified Linux package to upgrade. "
@@ -158,7 +165,12 @@ async def list_actions(
                 automation_blocker=(
                     "Ready to build an exact, approval-gated package upgrade plan."
                     if ready
-                    else automation_blocker(finding, agent, candidate_version)
+                    else automation_blocker(
+                        finding,
+                        agent,
+                        candidate_version,
+                        device.agent_applicable if device else True,
+                    )
                 ),
                 priority=priority(finding, device.criticality if device else None),
                 affected_package=finding.affected_package,

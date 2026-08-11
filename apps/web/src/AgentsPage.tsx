@@ -5,7 +5,7 @@ const age = (seconds:number|null) => seconds===null ? "—" : seconds>=86400 ? `
 const bytes = (value:number|null) => value===null ? "—" : `${(value/1_073_741_824).toFixed(1)} GB`;
 
 export function AgentsPage({agents,devices,csrf,refresh}:{agents:Agent[];devices:Device[];csrf:string;refresh:()=>Promise<void>}) {
-  const available=devices.filter(device=>!agents.some(agent=>agent.device_id===device.id));
+  const available=devices.filter(device=>device.agent_applicable&&!agents.some(agent=>agent.device_id===device.id));
   const [deviceId,setDeviceId]=useState(available[0]?.id||"");
   const [command,setCommand]=useState(""),[commandMode,setCommandMode]=useState<"enroll"|"update">("enroll");
   const [error,setError]=useState(""),[message,setMessage]=useState(""),[scanning,setScanning]=useState("");

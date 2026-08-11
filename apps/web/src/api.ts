@@ -1,7 +1,7 @@
 export type User = { id: string; username: string; is_admin: boolean };
 export type AuthResult = { user: User; csrf_token: string; expires_at: string };
 export type Device = {
-  id: string; display_name: string; address: string; hostname: string | null; mac_address:string|null;
+  id: string; display_name: string; address: string; hostname: string | null; mac_address:string|null; agent_applicable:boolean;
   device_type: string | null; criticality: string; trust: string; monitor_port: number | null;
   status: string; last_checked_at: string | null; last_latency_ms: number | null;
   last_failure_reason: string | null; notes: string | null;
@@ -29,7 +29,7 @@ export type StorageTarget = {id:string;name:string;relative_path:string;large_fi
 export type StorageScanJob = {id:string;target_id:string;status:"queued"|"running"|"completed"|"failed";files_scanned:number;findings_count:number;error:string|null;created_at:string;started_at:string|null;completed_at:string|null};
 export type ReportWindow = {checks:number;successful:number;uptime_percent:number|null;average_response_ms:number|null};
 export type ServiceReport = {id:string;name:string;status:string;checks:number;uptime_percent:number|null;average_response_ms:number|null};
-export type DeviceSecurityReport = {id:string;name:string;criticality:string;agent_version:string|null;agent_connected:boolean;active_vulnerabilities:number;critical_high:number;known_exploited:number;remediation_failed:number};
+export type DeviceSecurityReport = {id:string;name:string;criticality:string;agent_applicable:boolean;agent_version:string|null;agent_connected:boolean;active_vulnerabilities:number;critical_high:number;known_exploited:number;remediation_failed:number};
 export type OverviewReport = {generated_at:string;last_24_hours:ReportWindow;last_7_days:ReportWindow;services:ServiceReport[];open_incidents:number;incidents_7_days:number;network_changes_7_days:number;active_vulnerabilities:Record<string,number>;known_exploited:number;storage_recommendations:number;storage_flagged_bytes:number;agents_total:number;agents_connected:number;agents_current:number;package_vulnerabilities:number;remediation_status:Record<string,number>;devices:DeviceSecurityReport[]};
 export type DailyTrend = {date:string;checks:number;successful:number;uptime_percent:number|null;average_response_ms:number|null;incidents:number;expected_incidents:number;network_changes:number;container_alerts:number};
 export type HistoricalReport = {generated_at:string;days:number;start_at:string;end_at:string;summary:ReportWindow;incidents:number;expected_incidents:number;network_changes:number;container_alerts:number;daily:DailyTrend[];services:ServiceReport[]};

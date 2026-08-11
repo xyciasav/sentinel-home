@@ -54,6 +54,7 @@ class DeviceSecurityView(BaseModel):
     id: uuid.UUID
     name: str
     criticality: str
+    agent_applicable: bool
     agent_version: str | None
     agent_connected: bool
     active_vulnerabilities: int
@@ -365,6 +366,7 @@ async def overview_report(
                 id=device.id,
                 name=device.display_name,
                 criticality=device.criticality,
+                agent_applicable=device.agent_applicable,
                 agent_version=agent.version if agent else None,
                 agent_connected=bool(
                     agent

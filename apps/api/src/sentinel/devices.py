@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
 
 class DeviceCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
+    agent_applicable: bool = True
     address: str = Field(min_length=1, max_length=255)
     hostname: str | None = Field(default=None, max_length=255)
     device_type: str | None = Field(default=None, max_length=50)
@@ -46,6 +47,7 @@ class DeviceCreate(BaseModel):
 
 class DeviceView(BaseModel):
     id: uuid.UUID
+    agent_applicable: bool
     mac_address: str | None
     display_name: str
     address: str
@@ -67,6 +69,7 @@ class DeviceView(BaseModel):
 def device_view(device: Device) -> DeviceView:
     return DeviceView(
         id=device.id,
+        agent_applicable=device.agent_applicable,
         mac_address=device.mac_address,
         display_name=device.display_name,
         address=device.addresses[0].address if device.addresses else "",
@@ -243,6 +246,7 @@ async def create_device(
         raise HTTPException(status.HTTP_409_CONFLICT, "a device already uses this address")
     device = Device(
         display_name=payload.display_name.strip(),
+        agent_applicable=payload.agent_applicable,
         hostname=payload.hostname,
         device_type=payload.device_type,
         criticality=payload.criticality,
@@ -304,6 +308,7 @@ async def update_device(
     if duplicate is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "a device already uses this address")
     device.display_name = payload.display_name.strip()
+    device.agent_applicable = payload.agent_applicable
     device.hostname = payload.hostname
     device.device_type = payload.device_type
     device.criticality = payload.criticality
