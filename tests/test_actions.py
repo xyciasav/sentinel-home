@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
-from sentinel.actions import RemediationPlanView, priority
+from sentinel.actions import RemediationPlanView, automation_blocker, priority
 
 
 def test_known_exploited_finding_is_prioritized() -> None:
@@ -15,6 +15,19 @@ def test_medium_finding_has_explainable_priority() -> None:
     finding = SimpleNamespace(severity="medium", known_exploited=False)
 
     assert priority(finding, "normal") == 20
+
+
+def test_stale_executor_blocks_package_automation() -> None:
+    finding = SimpleNamespace(detection_method="osv-agent-package")
+    agent = SimpleNamespace(executor_version=None)
+
+    assert "required 0.2.0" in automation_blocker(finding, agent)
+
+
+def test_service_finding_explains_why_it_has_no_playbook() -> None:
+    finding = SimpleNamespace(detection_method="service-cpe")
+
+    assert "network/service finding" in automation_blocker(finding, None)
 
 
 def test_remediation_plan_view_accepts_database_model_attributes() -> None:

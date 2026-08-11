@@ -254,7 +254,9 @@ async def overview_report(
             bool(item.last_heartbeat_at and item.last_heartbeat_at >= now - timedelta(seconds=45))
             for item in agents
         ),
-        agents_current=sum(item.version == "0.5.1" for item in agents),
+        agents_current=sum(
+            item.version == "0.5.2" and item.executor_version == "0.2.0" for item in agents
+        ),
         package_vulnerabilities=int(
             await scalar(
                 select(func.count(VulnerabilityFinding.id)).where(

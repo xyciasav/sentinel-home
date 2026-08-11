@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 
 def request(url: str, payload: dict | None, token: str | None = None) -> dict:
@@ -153,11 +153,27 @@ def containers() -> list[dict] | None:
         return None
 
 
+def executor_version() -> str | None:
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["/usr/bin/sudo", "-n", "/usr/local/libexec/sentinel-remediate", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        value = result.stdout.strip()
+        return value[:40] if result.returncode == 0 and value else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def telemetry(include_packages: bool, include_containers: bool = False) -> dict:
     memory_percent, memory_used, memory_total = memory()
     disk = shutil.disk_usage("/")
     payload = {
         "version": VERSION,
+        "executor_version": executor_version(),
         "cpu_percent": cpu_percent(),
         "memory_percent": memory_percent,
         "memory_used_bytes": memory_used,

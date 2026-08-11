@@ -8,6 +8,7 @@ import sys
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.:_-]{0,254}$")
 VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.:~_-]{0,254}$")
+HELPER_VERSION = "0.2.0"
 
 
 def installed_version(package: str) -> str:
@@ -62,6 +63,9 @@ def run() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--version"]:
+        print(HELPER_VERSION)
+        raise SystemExit(0)
     try:
         raise SystemExit(run())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

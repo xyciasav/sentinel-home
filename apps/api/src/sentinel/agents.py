@@ -72,6 +72,7 @@ class ContainerInput(BaseModel):
 
 class HeartbeatInput(BaseModel):
     version: str = Field(min_length=1, max_length=40)
+    executor_version: str | None = Field(default=None, max_length=40)
     cpu_percent: int = Field(ge=0, le=100)
     memory_percent: int = Field(ge=0, le=100)
     memory_used_bytes: int = Field(ge=0)
@@ -93,6 +94,7 @@ class AgentView(BaseModel):
     device_id: uuid.UUID
     device_name: str
     version: str
+    executor_version: str | None
     platform: str
     hostname: str | None
     os_name: str | None
@@ -259,6 +261,7 @@ async def heartbeat(
     if agent.last_heartbeat_at and agent.last_heartbeat_at > now - timedelta(seconds=2):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "heartbeat rate limit exceeded")
     agent.version = payload.version
+    agent.executor_version = payload.executor_version
     agent.hostname = payload.hostname
     agent.os_name = payload.os_name
     agent.os_version = payload.os_version
@@ -308,6 +311,8 @@ async def next_command(
     database: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[Agent, Depends(authenticated_agent)],
 ) -> CommandView | None:
+    if agent.executor_version != "0.2.0":
+        return None
     retry_before = datetime.now(UTC) - timedelta(minutes=5)
     plan = await database.scalar(
         select(RemediationPlan)
@@ -392,6 +397,7 @@ async def list_agents(
                 device_id=device.id,
                 device_name=device.display_name,
                 version=agent.version,
+                executor_version=agent.executor_version,
                 platform=agent.platform,
                 hostname=agent.hostname,
                 os_name=agent.os_name,

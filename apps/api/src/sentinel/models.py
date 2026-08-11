@@ -340,6 +340,7 @@ class Agent(Base):
         ForeignKey("devices.id", ondelete="CASCADE"), unique=True
     )
     version: Mapped[str] = mapped_column(String(40))
+    executor_version: Mapped[str | None] = mapped_column(String(40))
     platform: Mapped[str] = mapped_column(String(40))
     hostname: Mapped[str | None] = mapped_column(String(255))
     os_name: Mapped[str | None] = mapped_column(String(100))

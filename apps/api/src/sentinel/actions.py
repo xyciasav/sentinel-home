@@ -21,6 +21,7 @@ from sentinel.models import (
 )
 
 router = APIRouter(prefix="/api/v1/actions", tags=["action center"])
+REQUIRED_EXECUTOR_VERSION = "0.2.0"
 
 
 class RemediationPlanView(BaseModel):
@@ -83,6 +84,11 @@ def automation_blocker(finding: VulnerabilityFinding, agent: Agent | None) -> st
         )
     if agent is None:
         return "Install or reconnect the Linux agent for this device before building a playbook."
+    if agent.executor_version != REQUIRED_EXECUTOR_VERSION:
+        return (
+            f"Update or repair the agent executor (required {REQUIRED_EXECUTOR_VERSION}, "
+            f"reported {agent.executor_version or 'not installed'})."
+        )
     return (
         "Collect the exact installed package and vendor fixed version before building a playbook."
     )
@@ -123,6 +129,7 @@ async def list_actions(
             device_criticality=device.criticality if device else None,
             automation_ready=bool(
                 agent
+                and agent.executor_version == REQUIRED_EXECUTOR_VERSION
                 and finding.detection_method == "osv-agent-package"
                 and finding.affected_package
                 and finding.installed_version
@@ -131,6 +138,8 @@ async def list_actions(
             automation_blocker=(
                 "Ready to build an exact, approval-gated package upgrade plan."
                 if agent
+                and agent.executor_version == REQUIRED_EXECUTOR_VERSION
+                and finding.detection_method == "osv-agent-package"
                 and finding.affected_package
                 and finding.installed_version
                 and finding.fixed_version
@@ -184,6 +193,11 @@ async def build_plan(
     )
     if agent is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "active Linux agent required")
+    if agent.executor_version != REQUIRED_EXECUTOR_VERSION:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"agent executor {REQUIRED_EXECUTOR_VERSION} must be installed before building a plan",
+        )
     binary_packages = list(
         await database.scalars(
             select(InstalledPackage)
@@ -264,6 +278,12 @@ async def release_plan(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "remediation plan not found")
     if plan.status != "approved":
         raise HTTPException(status.HTTP_409_CONFLICT, "only approved plans can be released")
+    agent = await database.get(Agent, plan.agent_id)
+    if agent is None or agent.executor_version != REQUIRED_EXECUTOR_VERSION:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"agent executor {REQUIRED_EXECUTOR_VERSION} must be installed before release",
+        )
     plan.status = "queued"
     database.add(
         AuditEvent(
@@ -332,6 +352,13 @@ async def retry_plan(
     database: Annotated[AsyncSession, Depends(get_session)],
     auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
 ) -> RemediationPlan:
+    plan = await database.get(RemediationPlan, plan_id)
+    agent = await database.get(Agent, plan.agent_id) if plan else None
+    if agent is None or agent.executor_version != REQUIRED_EXECUTOR_VERSION:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"repair agent executor {REQUIRED_EXECUTOR_VERSION} before retrying",
+        )
     return await transition_plan(
         plan_id, ("failed",), "queued", "remediation.plan.retry", database, auth[0]
     )
