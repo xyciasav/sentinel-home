@@ -17,6 +17,7 @@ from sentinel.models import (
     AgentEnrollment,
     AgentMetric,
     AuditEvent,
+    ContainerInstance,
     Device,
     InstalledPackage,
     RemediationPlan,
@@ -58,6 +59,17 @@ class PackageInput(BaseModel):
     source_version: str | None = Field(default=None, max_length=255)
 
 
+class ContainerInput(BaseModel):
+    container_id: str = Field(pattern=r"^[a-f0-9]{12,64}$")
+    name: str = Field(min_length=1, max_length=255)
+    image: str = Field(min_length=1, max_length=500)
+    state: str = Field(min_length=1, max_length=30)
+    health: str | None = Field(default=None, max_length=30)
+    status: str = Field(default="unknown", max_length=500)
+    ports: str = Field(default="", max_length=1000)
+    restart_count: int = Field(default=0, ge=0)
+
+
 class HeartbeatInput(BaseModel):
     version: str = Field(min_length=1, max_length=40)
     cpu_percent: int = Field(ge=0, le=100)
@@ -73,6 +85,7 @@ class HeartbeatInput(BaseModel):
     os_version: str | None = Field(default=None, max_length=100)
     kernel_version: str | None = Field(default=None, max_length=100)
     packages: list[PackageInput] | None = Field(default=None, max_length=20_000)
+    containers: list[ContainerInput] | None = Field(default=None, max_length=2_000)
 
 
 class AgentView(BaseModel):
@@ -93,6 +106,7 @@ class AgentView(BaseModel):
     disk_free_bytes: int | None
     uptime_seconds: int | None
     package_count: int
+    container_count: int
 
 
 class MetricView(BaseModel):
@@ -277,6 +291,15 @@ async def heartbeat(
             InstalledPackage(agent_id=agent.id, observed_at=now, **item.model_dump())
             for item in unique_packages.values()
         )
+    if payload.containers is not None:
+        await database.execute(
+            delete(ContainerInstance).where(ContainerInstance.agent_id == agent.id)
+        )
+        unique_containers = {item.container_id: item for item in payload.containers}
+        database.add_all(
+            ContainerInstance(agent_id=agent.id, observed_at=now, **item.model_dump())
+            for item in unique_containers.values()
+        )
     await database.commit()
 
 
@@ -360,6 +383,9 @@ async def list_agents(
         package_count = await database.scalar(
             select(func.count(InstalledPackage.id)).where(InstalledPackage.agent_id == agent.id)
         )
+        container_count = await database.scalar(
+            select(func.count(ContainerInstance.id)).where(ContainerInstance.agent_id == agent.id)
+        )
         result.append(
             AgentView(
                 id=agent.id,
@@ -382,6 +408,7 @@ async def list_agents(
                 disk_free_bytes=metric.disk_free_bytes if metric else None,
                 uptime_seconds=metric.uptime_seconds if metric else None,
                 package_count=int(package_count or 0),
+                container_count=int(container_count or 0),
             )
         )
     return result

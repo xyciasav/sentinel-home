@@ -13,7 +13,8 @@ install -d -o sentinel-agent -g sentinel-agent -m 0700 /var/lib/sentinel-agent
 install -m 0755 ./sentinel_agent.py /usr/local/bin/sentinel-agent
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 ./sentinel_remediate.py /usr/local/libexec/sentinel-remediate
-printf '%s\n' 'sentinel-agent ALL=(root) NOPASSWD: /usr/local/libexec/sentinel-remediate' >/etc/sudoers.d/sentinel-agent
+install -o root -g root -m 0755 ./sentinel_containers.py /usr/local/libexec/sentinel-containers
+printf '%s\n' 'sentinel-agent ALL=(root) NOPASSWD: /usr/local/libexec/sentinel-remediate, /usr/local/libexec/sentinel-containers' >/etc/sudoers.d/sentinel-agent
 chmod 0440 /etc/sudoers.d/sentinel-agent
 command -v visudo >/dev/null && visudo -cf /etc/sudoers.d/sentinel-agent
 

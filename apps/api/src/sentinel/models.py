@@ -399,6 +399,25 @@ class InstalledPackage(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class ContainerInstance(Base):
+    __tablename__ = "container_instances"
+    __table_args__ = (
+        Index("ix_container_instances_agent_container", "agent_id", "container_id", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    container_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255))
+    image: Mapped[str] = mapped_column(String(500))
+    state: Mapped[str] = mapped_column(String(30))
+    health: Mapped[str | None] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(500))
+    ports: Mapped[str] = mapped_column(String(1000), default="")
+    restart_count: Mapped[int] = mapped_column(Integer, default=0)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class RemediationPlan(Base):
     __tablename__ = "remediation_plans"
 

@@ -1,6 +1,6 @@
 # Sentinel Home
 
-Sentinel Home is a self-hosted home-network observability and security platform. This repository currently contains the Phase 1 architecture contracts and a minimal runnable API foundation. It intentionally does not scan, modify, restart, update, or delete anything.
+Sentinel Home is a self-hosted home-network observability and security platform with opt-in, approval-gated Linux remediation.
 
 ## Current capabilities
 
@@ -29,6 +29,7 @@ Sentinel Home is a self-hosted home-network observability and security platform.
 - Remediation queue summaries with cancel, retry, and archive lifecycle controls
 - Security operations reporting with agent coverage, remediation outcomes, and device risk
 - Bulk notification dismissal and expiring per-device email alert muting
+- Read-only Docker inventory with container state, health, ports, restarts, and host filters
 
 ## Quick start
 

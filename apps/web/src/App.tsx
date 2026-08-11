@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { ActionItem, Agent, api, Device, DiscoveryRun, Incident, NetworkChange, Notification, OverviewReport, ServiceMonitor, StorageScanJob, StorageTarget, User, VulnerabilityFinding } from "./api";
+import { ActionItem, Agent, api, ContainerInstance, Device, DiscoveryRun, Incident, NetworkChange, Notification, OverviewReport, ServiceMonitor, StorageScanJob, StorageTarget, User, VulnerabilityFinding } from "./api";
 import { DevicesPage } from "./DevicesPage";
 import { ServicesPage } from "./ServicesPage";
 import { IncidentsPage } from "./IncidentsPage";
@@ -11,6 +11,7 @@ import { StoragePage } from "./StoragePage";
 import { ReportsPage } from "./ReportsPage";
 import { ActionsPage } from "./ActionsPage";
 import { AgentsPage } from "./AgentsPage";
+import { ContainersPage } from "./ContainersPage";
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -20,7 +21,7 @@ export function App() {
   const [csrf, setCsrf] = useState("");
   const [health, setHealth] = useState("checking");
   const [version, setVersion] = useState("—");
-  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents" | "notifications" | "discovery" | "changes" | "vulnerabilities" | "storage" | "reports" | "actions" | "agents">("overview");
+  const [page, setPage] = useState<"overview" | "devices" | "services" | "incidents" | "notifications" | "discovery" | "changes" | "vulnerabilities" | "storage" | "reports" | "actions" | "agents" | "containers">("overview");
   const [devices, setDevices] = useState<Device[]>([]);
   const [monitors, setMonitors] = useState<ServiceMonitor[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -33,6 +34,7 @@ export function App() {
   const [report, setReport] = useState<OverviewReport|null>(null);
   const [actionItems, setActionItems] = useState<ActionItem[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [containers, setContainers] = useState<ContainerInstance[]>([]);
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
@@ -74,6 +76,7 @@ export function App() {
   async function loadReport() { setReport(await api.overviewReport()); }
   async function loadActions() { setActionItems(await api.actionItems()); }
   async function loadAgents() { setAgents(await api.agents()); }
+  async function loadContainers() { setContainers(await api.containers()); }
   function updateDiscoveryHost(host: DiscoveryRun["hosts"][number]) { setDiscovery(current=>current?{...current,hosts:current.hosts.map(item=>item.id===host.id?host:item)}:current); }
   function updateVulnerability(finding: VulnerabilityFinding) { setFindings(current=>current.map(item=>item.id===finding.id?finding:item)); }
 
@@ -88,10 +91,10 @@ export function App() {
   return <div className="app-shell">
     <aside>
       <Brand />
-      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="reports"?"active":""} onClick={()=>{setPage("reports");void loadReport()}}>Reports</button><button className={page==="actions"?"active":""} onClick={()=>{setPage("actions");void loadActions()}}>Action Center</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="agents"?"active":""} onClick={()=>{setPage("agents");void loadAgents()}}>Agents</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={page==="notifications"?"active":""} onClick={()=>setPage("notifications")}>Notifications</button><button className={page==="discovery"?"active":""} onClick={()=>{setPage("discovery");void loadDiscovery()}}>Discovery</button><button className={page==="changes"?"active":""} onClick={()=>{setPage("changes");void loadChanges()}}>Network changes</button><button className={page==="vulnerabilities"?"active":""} onClick={()=>{setPage("vulnerabilities");void loadFindings()}}>Vulnerabilities</button><button className={page==="storage"?"active":""} onClick={()=>{setPage("storage");void loadStorage()}}>Storage</button><button disabled>Containers<span>Soon</span></button></nav>
+      <nav><button className={page==="overview"?"active":""} onClick={()=>setPage("overview")}>Overview</button><button className={page==="reports"?"active":""} onClick={()=>{setPage("reports");void loadReport()}}>Reports</button><button className={page==="actions"?"active":""} onClick={()=>{setPage("actions");void loadActions()}}>Action Center</button><button className={page==="devices"?"active":""} onClick={()=>setPage("devices")}>Devices</button><button className={page==="agents"?"active":""} onClick={()=>{setPage("agents");void loadAgents()}}>Agents</button><button className={page==="containers"?"active":""} onClick={()=>{setPage("containers");void loadContainers()}}>Containers</button><button className={page==="services"?"active":""} onClick={()=>setPage("services")}>Services</button><button className={page==="incidents"?"active":""} onClick={()=>setPage("incidents")}>Incidents{incidents.some(i=>i.status==="open")&&<span>{incidents.filter(i=>i.status==="open").length}</span>}</button><button className={page==="notifications"?"active":""} onClick={()=>setPage("notifications")}>Notifications</button><button className={page==="discovery"?"active":""} onClick={()=>{setPage("discovery");void loadDiscovery()}}>Discovery</button><button className={page==="changes"?"active":""} onClick={()=>{setPage("changes");void loadChanges()}}>Network changes</button><button className={page==="vulnerabilities"?"active":""} onClick={()=>{setPage("vulnerabilities");void loadFindings()}}>Vulnerabilities</button><button className={page==="storage"?"active":""} onClick={()=>{setPage("storage");void loadStorage()}}>Storage</button></nav>
       <div className="sidebar-bottom"><div className="build-version">Sentinel Home <span>v{version}</span></div><a href="/docs">API documentation</a><button onClick={async()=>{await api.logout(csrf);setUser(null);setView("login");}}>Sign out</button></div>
     </aside>
-    <main>{page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
+    <main>{page==="containers" ? <ContainersPage containers={containers} refresh={loadContainers}/> : page==="devices" ? <DevicesPage devices={devices} csrf={csrf} refresh={loadDevices}/> : page==="agents" ? <AgentsPage agents={agents} devices={devices} csrf={csrf} refresh={loadAgents}/> : page==="services" ? <ServicesPage monitors={monitors} devices={devices} csrf={csrf} refresh={loadMonitors}/> : page==="incidents" ? <IncidentsPage incidents={incidents} csrf={csrf} refresh={loadIncidents}/> : page==="notifications" ? <NotificationsPage notifications={notifications} csrf={csrf} refresh={loadNotifications}/> : page==="discovery" ? <DiscoveryPage run={discovery} csrf={csrf} refresh={loadDiscovery} refreshDevices={loadDevices} updateHost={updateDiscoveryHost}/> : page==="changes" ? <NetworkChangesPage changes={changes}/> : page==="vulnerabilities" ? <VulnerabilitiesPage findings={findings} csrf={csrf} updateFinding={updateVulnerability}/> : page==="storage" ? <StoragePage targets={storageTargets} jobs={storageJobs} csrf={csrf} refresh={loadStorage}/> : page==="reports" ? <ReportsPage report={report} refresh={loadReport}/> : page==="actions" ? <ActionsPage items={actionItems} csrf={csrf} refresh={loadActions}/> : <>
       <header><div><p className="eyebrow">CONTROL CENTER</p><h1>Good to see you, {user?.username}</h1><p>Your monitoring foundation is online. Let’s connect your first system.</p></div><div className="live"><i /> Live</div></header>
       <section className="status-grid">
         <StatusCard label="Platform" value={health === "ok" ? "Healthy" : health} tone="green" detail="API, database, and queue" />

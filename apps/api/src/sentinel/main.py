@@ -11,6 +11,7 @@ from sentinel.actions import router as actions_router
 from sentinel.agents import router as agents_router
 from sentinel.auth import router as auth_router
 from sentinel.config import get_settings
+from sentinel.containers import router as containers_router
 from sentinel.devices import router as devices_router
 from sentinel.discovery import router as discovery_router
 from sentinel.health import database_status, redis_status
@@ -43,6 +44,7 @@ app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version
 app.include_router(actions_router)
 app.include_router(agents_router)
 app.include_router(auth_router)
+app.include_router(containers_router)
 app.include_router(devices_router)
 app.include_router(discovery_router)
 app.include_router(incidents_router)

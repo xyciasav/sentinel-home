@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 def request(url: str, payload: dict | None, token: str | None = None) -> dict:
@@ -136,7 +136,24 @@ def packages() -> list[dict[str, str | None]]:
     return result
 
 
-def telemetry(include_packages: bool) -> dict:
+def containers() -> list[dict] | None:
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["/usr/bin/sudo", "-n", "/usr/local/libexec/sentinel-containers"],
+            capture_output=True,
+            text=True,
+            timeout=150,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        payload = json.loads(result.stdout)
+        return payload if isinstance(payload, list) else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def telemetry(include_packages: bool, include_containers: bool = False) -> dict:
     memory_percent, memory_used, memory_total = memory()
     disk = shutil.disk_usage("/")
     payload = {
@@ -164,6 +181,10 @@ def telemetry(include_packages: bool) -> dict:
     payload["os_version"] = os_release.get("VERSION_ID") or platform.version()
     if include_packages:
         payload["packages"] = packages()
+    if include_containers:
+        inventory = containers()
+        if inventory is not None:
+            payload["containers"] = inventory
     return payload
 
 
@@ -205,14 +226,21 @@ def main() -> None:
         state.chmod(stat.S_IRUSR | stat.S_IWUSR)
     if args.enroll_only:
         return
-    next_packages = 0.0
+    next_packages, next_containers = 0.0, 0.0
     while True:
         try:
             now = time.time()
             include_packages = now >= next_packages
-            request(f"{base_url}/api/v1/agents/heartbeat", telemetry(include_packages), token)
+            include_containers = now >= next_containers
+            request(
+                f"{base_url}/api/v1/agents/heartbeat",
+                telemetry(include_packages, include_containers),
+                token,
+            )
             if include_packages:
                 next_packages = now + 21_600
+            if include_containers:
+                next_containers = now + 300
             command = request(f"{base_url}/api/v1/agents/commands/next", None, token)
             if command:
                 result = run_command(command, token)
