@@ -27,6 +27,40 @@ from sentinel.models import (
 router = APIRouter(prefix="/api/v1/vulnerabilities", tags=["vulnerabilities"])
 
 
+async def reconcile_package_findings(database: AsyncSession) -> int:
+    """Resolve findings whose exact package snapshot is no longer installed."""
+    package_rows = (
+        await database.execute(
+            select(Agent.device_id, InstalledPackage).join(
+                InstalledPackage, InstalledPackage.agent_id == Agent.id
+            )
+        )
+    ).all()
+    installed: dict[uuid.UUID, dict[str, set[str]]] = {}
+    for device_id, package in package_rows:
+        source_name = package.source_name or package.name
+        source_version = package.source_version or package.version
+        installed.setdefault(device_id, {}).setdefault(source_name, set()).add(source_version)
+    findings = list(
+        await database.scalars(
+            select(VulnerabilityFinding).where(
+                VulnerabilityFinding.device_id.is_not(None),
+                VulnerabilityFinding.detection_method == "osv-agent-package",
+                VulnerabilityFinding.status.in_(("open", "investigating")),
+            )
+        )
+    )
+    resolved = 0
+    for finding in findings:
+        versions = installed.get(finding.device_id, {}).get(finding.affected_package or "", set())
+        if finding.device_id in installed and finding.installed_version not in versions:
+            finding.status = "resolved"
+            resolved += 1
+    if resolved:
+        await database.commit()
+    return resolved
+
+
 class FindingView(BaseModel):
     id: uuid.UUID
     device_id: uuid.UUID | None
@@ -177,6 +211,7 @@ async def list_findings(
     database: Annotated[AsyncSession, Depends(get_session)],
     _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
 ) -> list[VulnerabilityFinding]:
+    await reconcile_package_findings(database)
     return list(
         await database.scalars(
             select(VulnerabilityFinding).order_by(VulnerabilityFinding.last_seen_at.desc())
@@ -367,6 +402,8 @@ async def scan_agent_packages(
             else:
                 for key, value in values.items():
                     setattr(item, key, value)
+                if item.status == "resolved":
+                    item.status = "open"
             found.append(item)
     seen = {item.cve_id for item in found}
     previous = list(

@@ -298,6 +298,24 @@ async def heartbeat(
             InstalledPackage(agent_id=agent.id, observed_at=now, **item.model_dump())
             for item in unique_packages.values()
         )
+        current_sources: dict[str, set[str]] = {}
+        for item in unique_packages.values():
+            source_name = item.source_name or item.name
+            source_version = item.source_version or item.version
+            current_sources.setdefault(source_name, set()).add(source_version)
+        active_package_findings = list(
+            await database.scalars(
+                select(VulnerabilityFinding).where(
+                    VulnerabilityFinding.device_id == agent.device_id,
+                    VulnerabilityFinding.detection_method == "osv-agent-package",
+                    VulnerabilityFinding.status.in_(("open", "investigating")),
+                )
+            )
+        )
+        for finding in active_package_findings:
+            versions = current_sources.get(finding.affected_package or "", set())
+            if finding.installed_version not in versions:
+                finding.status = "resolved"
     if payload.containers is not None:
         await database.execute(
             delete(ContainerInstance).where(ContainerInstance.agent_id == agent.id)

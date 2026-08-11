@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
@@ -19,6 +19,7 @@ from sentinel.models import (
     User,
     VulnerabilityFinding,
 )
+from sentinel.vulnerabilities import reconcile_package_findings
 
 router = APIRouter(prefix="/api/v1/actions", tags=["action center"])
 REQUIRED_EXECUTOR_VERSION = "0.3.2"
@@ -99,18 +100,14 @@ async def list_actions(
     database: Annotated[AsyncSession, Depends(get_session)],
     _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
 ) -> list[ActionItemView]:
+    await reconcile_package_findings(database)
     rows = (
         await database.execute(
             select(VulnerabilityFinding, Device, Agent, RemediationPlan)
             .outerjoin(Device, Device.id == VulnerabilityFinding.device_id)
             .outerjoin(Agent, (Agent.device_id == Device.id) & Agent.revoked_at.is_(None))
             .outerjoin(RemediationPlan, RemediationPlan.finding_id == VulnerabilityFinding.id)
-            .where(
-                or_(
-                    VulnerabilityFinding.status.in_(("open", "investigating")),
-                    (RemediationPlan.id.is_not(None)) & (RemediationPlan.status != "archived"),
-                )
-            )
+            .where(VulnerabilityFinding.status.in_(("open", "investigating")))
         )
     ).all()
     items = [
