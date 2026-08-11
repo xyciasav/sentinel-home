@@ -51,6 +51,26 @@ export function App() {
 
   useEffect(() => { void initialize(); }, []);
   useEffect(() => {
+    const markNonLoginSecrets = () => {
+      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[type="password"], input[name="key"], textarea[name="token"]').forEach(field => {
+        if (field.closest(".auth-form")) return;
+        field.setAttribute("autocomplete", "one-time-code");
+        field.setAttribute("data-1p-ignore", "true");
+        field.setAttribute("data-lpignore", "true");
+        field.setAttribute("data-bwignore", "true");
+        const form = field.closest("form");
+        form?.setAttribute("autocomplete", "off");
+        form?.setAttribute("data-1p-ignore", "true");
+        form?.setAttribute("data-lpignore", "true");
+        form?.setAttribute("data-bwignore", "true");
+      });
+    };
+    markNonLoginSecrets();
+    const observer = new MutationObserver(markNonLoginSecrets);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
     if (view !== "dashboard") return;
     const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); void loadIncidents(); void loadNotifications(); }, 10000);
     return () => window.clearInterval(timer);
