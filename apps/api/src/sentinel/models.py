@@ -437,6 +437,7 @@ class InstalledPackage(Base):
     manager: Mapped[str] = mapped_column(String(30))
     source_name: Mapped[str | None] = mapped_column(String(255))
     source_version: Mapped[str | None] = mapped_column(String(255))
+    candidate_version: Mapped[str | None] = mapped_column(String(255))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

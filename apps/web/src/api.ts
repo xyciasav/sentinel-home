@@ -37,7 +37,7 @@ export type InventorySource = {id:string;name:string;kind:string;base_url:string
 export type SourceDevice = {id:string;external_id:string;name:string;address:string|null;mac_address:string|null;manufacturer:string|null;model:string|null;area_name:string|null;imported_device_id:string|null};
 export type AgentEnrollment = {enrollment_token:string;expires_at:string};
 export type AgentMetric = {cpu_percent:number;memory_percent:number;disk_percent:number;disk_free_bytes:number;uptime_seconds:number;collected_at:string};
-export type InstalledPackage = {name:string;version:string;architecture:string|null;manager:string;source_name:string|null;source_version:string|null;observed_at:string};
+export type InstalledPackage = {name:string;version:string;architecture:string|null;manager:string;source_name:string|null;source_version:string|null;candidate_version:string|null;observed_at:string};
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers, ...requestOptions } = options;

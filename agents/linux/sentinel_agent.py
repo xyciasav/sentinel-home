@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 
 
 def request(
@@ -135,6 +135,19 @@ def memory() -> tuple[int, int, int]:
 
 
 def packages() -> list[dict[str, str | None]]:
+    candidates: dict[str, str] = {}
+    if shutil.which("apt"):
+        upgrade_output = subprocess.run(  # noqa: S603
+            ["/usr/bin/apt", "list", "--upgradable"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        ).stdout
+        for line in upgrade_output.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and "/" in fields[0]:
+                candidates[fields[0].split("/", 1)[0].split(":", 1)[0]] = fields[1]
     if shutil.which("dpkg-query"):
         command = [
             "dpkg-query",
@@ -169,6 +182,7 @@ def packages() -> list[dict[str, str | None]]:
                     "source_version": (parts[4] or parts[1])[:255]
                     if manager == "dpkg" and len(parts) > 4
                     else None,
+                    "candidate_version": candidates.get(parts[0].split(":", 1)[0]),
                 }
             )
     return result

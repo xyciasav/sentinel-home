@@ -13,7 +13,7 @@ def test_linux_agent_postpones_newer_type_annotation_evaluation() -> None:
     source = Path("agents/linux/sentinel_agent.py").read_text(encoding="utf-8")
 
     assert "from __future__ import annotations" in source
-    assert 'VERSION = "0.6.1"' in source
+    assert 'VERSION = "0.6.2"' in source
     assert "verify_command" in source
     assert "${db:Status-Abbrev}" in source
     assert 'parts[5].startswith("ii")' in source
@@ -29,7 +29,7 @@ def test_remediation_helper_has_no_shell_execution_surface() -> None:
     assert '["/usr/bin/apt-get", "update"]' in source
     assert 'f"{package}={target}"' not in source
     assert '"--only-upgrade", "--assume-yes", package' in source
-    assert 'HELPER_VERSION = "0.3.2"' in source
+    assert 'HELPER_VERSION = "0.3.3"' in source
     assert "package is not fully installed" in source
 
 

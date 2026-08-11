@@ -21,13 +21,24 @@ def test_stale_executor_blocks_package_automation() -> None:
     finding = SimpleNamespace(detection_method="osv-agent-package")
     agent = SimpleNamespace(executor_version=None)
 
-    assert "required 0.3.2" in automation_blocker(finding, agent)
+    assert "required 0.3.3" in automation_blocker(finding, agent, None)
 
 
 def test_service_finding_explains_why_it_has_no_playbook() -> None:
     finding = SimpleNamespace(detection_method="service-cpe")
 
-    assert "network/service finding" in automation_blocker(finding, None)
+    assert "network/service finding" in automation_blocker(finding, None, None)
+
+
+def test_missing_repository_candidate_blocks_package_automation() -> None:
+    finding = SimpleNamespace(
+        detection_method="osv-agent-package",
+        affected_package="firmware-intelwimax",
+        installed_version="20210818-1~bpo11+1",
+    )
+    agent = SimpleNamespace(executor_version="0.3.3")
+
+    assert "no repository upgrade candidate" in automation_blocker(finding, agent, None)
 
 
 def test_remediation_plan_view_accepts_database_model_attributes() -> None:

@@ -9,7 +9,7 @@ import sys
 
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.:_-]{0,254}$")
 VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.:~_-]{0,254}$")
-HELPER_VERSION = "0.3.2"
+HELPER_VERSION = "0.3.3"
 
 
 def installed_version(package: str) -> str:
@@ -52,6 +52,27 @@ def run() -> int:
         timeout=600,
         check=True,
     )
+    policy = subprocess.run(  # noqa: S603
+        ["/usr/bin/apt-cache", "policy", package],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    ).stdout
+    candidate = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in policy.splitlines()
+            if line.strip().startswith("Candidate:")
+        ),
+        "",
+    )
+    if not candidate or candidate == "(none)" or candidate == current:
+        raise RuntimeError(
+            f"no repository upgrade candidate for {package}; "
+            f"installed and candidate are {current}. "
+            "This package may be left over from an older OS release and requires manual review."
+        )
     print("[2/5] Configuring any unpacked packages", flush=True)
     subprocess.run(  # noqa: S603
         ["/usr/bin/dpkg", "--configure", "--pending"],

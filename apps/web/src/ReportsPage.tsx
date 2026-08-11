@@ -11,7 +11,7 @@ export function ReportsPage({report,refresh}:{report:OverviewReport|null;refresh
     <header><div><p className="eyebrow">OPERATIONS AND SECURITY</p><h1>Reports</h1><p>Current posture and measured reliability, generated {new Date(report.generated_at).toLocaleString()}.</p></div><button className="primary compact" onClick={()=>void refresh()}>Refresh report</button></header>
     <section className="status-grid report-cards">
       <article className="status-card"><p>24-hour uptime</p><strong>{percent(report.last_24_hours.uptime_percent)}</strong><small>{report.last_24_hours.checks.toLocaleString()} checks · {report.last_24_hours.average_response_ms??"—"} ms average</small></article>
-      <article className="status-card"><p>Agent coverage</p><strong className={report.agents_connected===report.agents_total?"green":""}>{report.agents_connected} / {report.agents_total}</strong><small>{report.agents_current} running agent v0.6.1 + executor v0.3.2</small></article>
+      <article className="status-card"><p>Agent coverage</p><strong className={report.agents_connected===report.agents_total?"green":""}>{report.agents_connected} / {report.agents_total}</strong><small>{report.agents_current} running agent v0.6.2 + executor v0.3.3</small></article>
       <article className="status-card"><p>Package vulnerabilities</p><strong>{report.package_vulnerabilities}</strong><small>Verified from installed Linux packages</small></article>
       <article className="status-card"><p>Known exploited</p><strong className={report.known_exploited?"report-danger":"green"}>{report.known_exploited}</strong><small>Active CISA KEV findings</small></article>
     </section>

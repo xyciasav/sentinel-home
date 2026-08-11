@@ -57,6 +57,7 @@ class PackageInput(BaseModel):
     manager: str = Field(min_length=1, max_length=30)
     source_name: str | None = Field(default=None, max_length=255)
     source_version: str | None = Field(default=None, max_length=255)
+    candidate_version: str | None = Field(default=None, max_length=255)
 
 
 class ContainerInput(BaseModel):
@@ -127,6 +128,7 @@ class PackageView(BaseModel):
     manager: str
     source_name: str | None
     source_version: str | None
+    candidate_version: str | None
     observed_at: datetime
 
 
@@ -333,7 +335,7 @@ async def next_command(
     database: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[Agent, Depends(authenticated_agent)],
 ) -> CommandView | None:
-    if agent.executor_version != "0.3.2":
+    if agent.executor_version != "0.3.3":
         return None
     retry_before = datetime.now(UTC) - timedelta(minutes=5)
     plan = await database.scalar(

@@ -22,7 +22,7 @@ from sentinel.models import (
 from sentinel.vulnerabilities import reconcile_package_findings
 
 router = APIRouter(prefix="/api/v1/actions", tags=["action center"])
-REQUIRED_EXECUTOR_VERSION = "0.3.2"
+REQUIRED_EXECUTOR_VERSION = "0.3.3"
 
 
 class RemediationPlanView(BaseModel):
@@ -76,7 +76,9 @@ def priority(finding: VulnerabilityFinding, criticality: str | None) -> int:
     return min(score, 100)
 
 
-def automation_blocker(finding: VulnerabilityFinding, agent: Agent | None) -> str:
+def automation_blocker(
+    finding: VulnerabilityFinding, agent: Agent | None, candidate_version: str | None
+) -> str:
     if finding.detection_method != "osv-agent-package":
         return (
             "This is a network/service finding, so there is no verified Linux package to upgrade. "
@@ -89,6 +91,11 @@ def automation_blocker(finding: VulnerabilityFinding, agent: Agent | None) -> st
         return (
             f"Update or repair the agent executor (required {REQUIRED_EXECUTOR_VERSION}, "
             f"reported {agent.executor_version or 'not installed'})."
+        )
+    if finding.affected_package and finding.installed_version and not candidate_version:
+        return (
+            "APT reports no repository upgrade candidate. This is commonly an old-release or "
+            "backports package and requires manual replacement or removal."
         )
     return (
         "Collect the exact installed package and vendor fixed version before building a playbook."
@@ -110,47 +117,57 @@ async def list_actions(
             .where(VulnerabilityFinding.status.in_(("open", "investigating")))
         )
     ).all()
-    items = [
-        ActionItemView(
-            finding_id=finding.id,
-            cve_id=finding.cve_id,
-            title=finding.title,
-            severity=finding.severity,
-            cvss_score=finding.cvss_score,
-            known_exploited=finding.known_exploited,
-            required_action=finding.required_action,
-            action_due=finding.action_due,
-            finding_status=finding.status,
-            address=finding.address,
-            device_name=device.display_name if device else None,
-            device_criticality=device.criticality if device else None,
-            automation_ready=bool(
-                agent
-                and agent.executor_version == REQUIRED_EXECUTOR_VERSION
-                and finding.detection_method == "osv-agent-package"
-                and finding.affected_package
-                and finding.installed_version
-                and finding.fixed_version
-            ),
-            automation_blocker=(
-                "Ready to build an exact, approval-gated package upgrade plan."
-                if agent
-                and agent.executor_version == REQUIRED_EXECUTOR_VERSION
-                and finding.detection_method == "osv-agent-package"
-                and finding.affected_package
-                and finding.installed_version
-                and finding.fixed_version
-                else automation_blocker(finding, agent)
-            ),
-            priority=priority(finding, device.criticality if device else None),
-            affected_package=finding.affected_package,
-            installed_version=finding.installed_version,
-            fixed_version=finding.fixed_version,
-            detection_method=finding.detection_method,
-            plan=plan,
+    items = []
+    for finding, device, agent, plan in rows:
+        candidate_version = None
+        if agent and finding.affected_package and finding.installed_version:
+            candidate_version = await database.scalar(
+                select(InstalledPackage.candidate_version)
+                .where(
+                    InstalledPackage.agent_id == agent.id,
+                    InstalledPackage.source_name == finding.affected_package,
+                    InstalledPackage.source_version == finding.installed_version,
+                    InstalledPackage.candidate_version.is_not(None),
+                )
+                .limit(1)
+            )
+        ready = bool(
+            agent
+            and agent.executor_version == REQUIRED_EXECUTOR_VERSION
+            and finding.detection_method == "osv-agent-package"
+            and finding.affected_package
+            and finding.installed_version
+            and finding.fixed_version
+            and candidate_version
         )
-        for finding, device, agent, plan in rows
-    ]
+        items.append(
+            ActionItemView(
+                finding_id=finding.id,
+                cve_id=finding.cve_id,
+                title=finding.title,
+                severity=finding.severity,
+                cvss_score=finding.cvss_score,
+                known_exploited=finding.known_exploited,
+                required_action=finding.required_action,
+                action_due=finding.action_due,
+                finding_status=finding.status,
+                address=finding.address,
+                device_name=device.display_name if device else None,
+                device_criticality=device.criticality if device else None,
+                automation_ready=ready,
+                automation_blocker=(
+                    "Ready to build an exact, approval-gated package upgrade plan."
+                    if ready
+                    else automation_blocker(finding, agent, candidate_version)
+                ),
+                priority=priority(finding, device.criticality if device else None),
+                affected_package=finding.affected_package,
+                installed_version=finding.installed_version,
+                fixed_version=finding.fixed_version,
+                detection_method=finding.detection_method,
+                plan=plan,
+            )
+        )
     return sorted(items, key=lambda item: (-item.priority, item.cve_id, item.address))
 
 
@@ -210,6 +227,12 @@ async def build_plan(
         (item for item in binary_packages if item.name == finding.affected_package),
         next((item for item in binary_packages if not item.name.endswith("-dev")), None),
     )
+    if binary_package is None or not binary_package.candidate_version:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "APT has no repository upgrade candidate; manually replace or remove this "
+            "old-release package",
+        )
     plan = RemediationPlan(
         finding_id=finding.id,
         agent_id=agent.id,
