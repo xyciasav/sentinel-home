@@ -17,6 +17,7 @@ from sentinel.models import (
     AgentEnrollment,
     AgentMetric,
     AuditEvent,
+    ContainerEvent,
     ContainerInstance,
     Device,
     InstalledPackage,
@@ -319,14 +320,90 @@ async def heartbeat(
             if finding.installed_version not in versions:
                 finding.status = "resolved"
     if payload.containers is not None:
-        await database.execute(
-            delete(ContainerInstance).where(ContainerInstance.agent_id == agent.id)
-        )
         unique_containers = {item.container_id: item for item in payload.containers}
-        database.add_all(
-            ContainerInstance(agent_id=agent.id, observed_at=now, **item.model_dump())
-            for item in unique_containers.values()
-        )
+        existing = {
+            item.container_id: item
+            for item in await database.scalars(
+                select(ContainerInstance).where(ContainerInstance.agent_id == agent.id)
+            )
+        }
+        for container_id, item in unique_containers.items():
+            current = existing.pop(container_id, None)
+            if current is None:
+                database.add(
+                    ContainerInstance(
+                        agent_id=agent.id, observed_at=now, present=True, **item.model_dump()
+                    )
+                )
+                continue
+            changes = []
+            if current.state != item.state:
+                changes.append(
+                    (
+                        "state_changed",
+                        "high" if item.state != "running" else "low",
+                        f"State changed from {current.state} to {item.state}.",
+                    )
+                )
+            if current.health != item.health and item.health:
+                changes.append(
+                    (
+                        "health_changed",
+                        "high" if item.health == "unhealthy" else "low",
+                        f"Health changed from {current.health or 'none'} to {item.health}.",
+                    )
+                )
+            if item.restart_count > current.restart_count:
+                changes.append(
+                    (
+                        "restarted",
+                        "medium",
+                        "Restart count increased from "
+                        f"{current.restart_count} to {item.restart_count}.",
+                    )
+                )
+            if current.image != item.image:
+                changes.append(
+                    (
+                        "image_changed",
+                        "medium",
+                        f"Image changed from {current.image} to {item.image}.",
+                    )
+                )
+            for kind, severity, message in changes:
+                database.add(
+                    ContainerEvent(
+                        agent_id=agent.id,
+                        container_id=container_id,
+                        container_name=item.name,
+                        kind=kind,
+                        severity=severity,
+                        message=message,
+                        occurred_at=now,
+                    )
+                )
+            for field, value in item.model_dump().items():
+                setattr(current, field, value)
+            current.present = True
+            current.observed_at = now
+        for missing in existing.values():
+            if missing.present:
+                database.add(
+                    ContainerEvent(
+                        agent_id=agent.id,
+                        container_id=missing.container_id,
+                        container_name=missing.name,
+                        kind="disappeared",
+                        severity="high",
+                        message="Container is no longer reported by Docker.",
+                        occurred_at=now,
+                    )
+                )
+            missing.present = False
+            missing.state = "missing"
+            missing.health = None
+            missing.status = "No longer reported by Docker"
+            missing.observed_at = now
     await database.commit()
 
 

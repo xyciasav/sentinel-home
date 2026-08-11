@@ -505,7 +505,28 @@ class ContainerInstance(Base):
     status: Mapped[str] = mapped_column(String(500))
     ports: Mapped[str] = mapped_column(String(1000), default="")
     restart_count: Mapped[int] = mapped_column(Integer, default=0)
+    present: Mapped[bool] = mapped_column(Boolean, default=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ContainerEvent(Base):
+    __tablename__ = "container_events"
+    __table_args__ = (Index("ix_container_events_occurred_at", "occurred_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    container_id: Mapped[str] = mapped_column(String(64))
+    container_name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(30))
+    severity: Mapped[str] = mapped_column(String(20))
+    message: Mapped[str] = mapped_column(String(500))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class RemediationPlan(Base):
