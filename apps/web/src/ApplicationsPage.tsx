@@ -1,9 +1,16 @@
-import { FormEvent, useState } from "react";
-import { api, ApplicationIntegration } from "./api";
+import { FormEvent, useEffect, useState } from "react";
+import { api, ApplicationEvent, ApplicationIntegration } from "./api";
 
 const labels:Record<string,[string,string,string,string]>={sonarr:["Queue","Failed","Series","Monitored"],radarr:["Queue","Failed","Movies","Monitored"],prowlarr:["Disabled","Health","Indexers","Enabled"],sabnzbd:["Queue","Failed","History","Active"],plex:["Queue","Failures","Libraries","Streams"],qbittorrent:["Torrents","Errors","Torrents","Active"]};
 
-export function ApplicationsPage({items,csrf,refresh}:{items:ApplicationIntegration[];csrf:string;refresh:()=>Promise<void>}){
+export function ApplicationsPage(props:{items:ApplicationIntegration[];csrf:string;refresh:()=>Promise<void>}){
+ const [section,setSection]=useState<"insights"|"alerts">("insights"),[events,setEvents]=useState<ApplicationEvent[]>([]);
+ async function loadEvents(){setEvents(await api.applicationEvents())} useEffect(()=>{void loadEvents()},[]);
+ const open=events.filter(item=>!item.acknowledged_at).length;
+ return <><div className="network-tabs panel"><button className={section==="insights"?"active":""} onClick={()=>setSection("insights")}>Insights</button><button className={section==="alerts"?"active":""} onClick={()=>{setSection("alerts");void loadEvents()}}>Alerts{open?` (${open})`:""}</button></div>{section==="insights"?<ApplicationInventory {...props}/>:<ApplicationAlerts events={events} csrf={props.csrf} refresh={loadEvents}/>}</>;
+}
+
+function ApplicationInventory({items,csrf,refresh}:{items:ApplicationIntegration[];csrf:string;refresh:()=>Promise<void>}){
  const [adding,setAdding]=useState(false),[busy,setBusy]=useState(""),[error,setError]=useState(""),[kind,setKind]=useState("sonarr");
  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy("create");setError("");const data=new FormData(e.currentTarget);try{await api.createApplication({name:data.get("name"),kind,base_url:data.get("url"),api_key:data.get("key"),username:data.get("username")||null},csrf);setAdding(false);await refresh()}catch(x){setError(x instanceof Error?x.message:"Could not connect application")}finally{setBusy("")}}
  const size=(value:number|null)=>value===null?"No disk data":value>1e9?`${(value/1e9).toFixed(1)} GB free`:`${(value/1e6).toFixed(1)} MB free`;
@@ -11,3 +18,8 @@ export function ApplicationsPage({items,csrf,refresh}:{items:ApplicationIntegrat
  {adding&&<div className="modal-backdrop"><form className="device-form panel application-modal" onSubmit={submit}><div className="panel-title"><div><p className="eyebrow">READ-ONLY API</p><h2>Connect application</h2></div><button type="button" className="close" onClick={()=>setAdding(false)}>×</button></div><p>The target must be private/local. Credentials are encrypted and never returned to the browser.</p><label>Application<select value={kind} onChange={e=>setKind(e.target.value)}><option value="sonarr">Sonarr</option><option value="radarr">Radarr</option><option value="prowlarr">Prowlarr</option><option value="sabnzbd">SABnzbd</option><option value="plex">Plex</option><option value="qbittorrent">qBittorrent</option></select></label><label>Display name<input name="name" required placeholder="Media server"/></label><label>Local base URL<input name="url" type="url" required placeholder="http://10.0.0.230:8989"/></label>{kind==="qbittorrent"&&<label>Username<input name="username" required defaultValue="admin" autoComplete="username"/></label>}<label>{kind==="qbittorrent"?"Password":kind==="plex"?"Plex token":"API key"}<input name="key" type="password" required autoComplete="off"/></label>{error&&<div className="error">{error}</div>}<div className="form-actions"><button type="button" onClick={()=>setAdding(false)}>Cancel</button><button className="primary compact" disabled={busy==="create"}>{busy==="create"?"Connecting…":"Connect and sync"}</button></div></form></div>}</>;
 }
 function Metric({label,value,danger}:{label:string;value:number;danger?:boolean}){return <div><small>{label}</small><b className={danger?"report-danger":""}>{value}</b></div>}
+
+function ApplicationAlerts({events,csrf,refresh}:{events:ApplicationEvent[];csrf:string;refresh:()=>Promise<void>}){
+ const [filter,setFilter]=useState("open"),[busy,setBusy]=useState("");const visible=events.filter(item=>filter==="all"||filter==="open"&&!item.acknowledged_at||filter==="acknowledged"&&item.acknowledged_at);
+ return <><header><div><p className="eyebrow">APPLICATION ANOMALIES</p><h1>Application alerts</h1><p>New failures, unusual queue growth, API outages, and recoveries detected from native snapshots.</p></div><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="open">Needs review</option><option value="all">All events</option><option value="acknowledged">Acknowledged</option></select></header>{visible.length===0?<div className="empty-state panel"><div>✓</div><h2>No application alerts need review</h2></div>:<div className="panel network-alert-list">{visible.map(item=><article key={item.id} className={item.acknowledged_at?"acknowledged":""}><i className={`alert-severity ${item.severity}`}/><div><p className="eyebrow">{item.application_kind.toUpperCase()} · {item.kind.replaceAll("_"," ").toUpperCase()}</p><h2>{item.application_name}</h2><p>{item.message}</p></div><time>{new Date(item.occurred_at).toLocaleString()}</time>{item.acknowledged_at?<span className="tag">Reviewed</span>:<button disabled={busy===item.id} onClick={async()=>{setBusy(item.id);try{await api.acknowledgeApplicationEvent(item.id,csrf);await refresh()}finally{setBusy("")}}}>{busy===item.id?"Saving…":"Acknowledge"}</button>}</article>)}</div>}</>;
+}

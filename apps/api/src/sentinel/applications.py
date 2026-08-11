@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.database import get_session, get_session_factory
-from sentinel.models import ApplicationIntegration, ApplicationSnapshot, AuditEvent, Session, User
+from sentinel.models import (
+    ApplicationEvent,
+    ApplicationIntegration,
+    ApplicationSnapshot,
+    AuditEvent,
+    Session,
+    User,
+)
 from sentinel.security import decrypt_secret, encrypt_secret
 from sentinel.sources import safe_base_url
 
@@ -49,6 +56,18 @@ class ApplicationView(BaseModel):
     last_sync_error: str | None
     latest: SnapshotView | None
     history: list[SnapshotView]
+
+
+class ApplicationEventView(BaseModel):
+    id: uuid.UUID
+    integration_id: uuid.UUID
+    application_name: str
+    application_kind: str
+    kind: str
+    severity: str
+    message: str
+    acknowledged_at: datetime | None
+    occurred_at: datetime
 
 
 async def collect(integration: ApplicationIntegration) -> dict:
@@ -208,15 +227,79 @@ async def collect(integration: ApplicationIntegration) -> dict:
 
 
 async def sync_application(database: AsyncSession, integration: ApplicationIntegration) -> None:
+    previous_status = integration.last_sync_status
+    previous = await database.scalar(
+        select(ApplicationSnapshot)
+        .where(ApplicationSnapshot.integration_id == integration.id)
+        .order_by(ApplicationSnapshot.collected_at.desc())
+        .limit(1)
+    )
+    now = datetime.now(UTC)
     try:
         values = await collect(integration)
         database.add(ApplicationSnapshot(integration_id=integration.id, **values))
+        if previous and values["failed_count"] > previous.failed_count:
+            database.add(
+                ApplicationEvent(
+                    integration_id=integration.id,
+                    kind="failures_increased",
+                    severity="high",
+                    message=(
+                        f"Failed items increased from {previous.failed_count} "
+                        f"to {values['failed_count']}."
+                    ),
+                    occurred_at=now,
+                )
+            )
+        if previous and values["queue_count"] >= max(10, previous.queue_count * 2):
+            database.add(
+                ApplicationEvent(
+                    integration_id=integration.id,
+                    kind="queue_spike",
+                    severity="medium",
+                    message=(
+                        f"Queue grew from {previous.queue_count} "
+                        f"to {values['queue_count']} items."
+                    ),
+                    occurred_at=now,
+                )
+            )
+        if previous and previous.failed_count > 0 and values["failed_count"] == 0:
+            database.add(
+                ApplicationEvent(
+                    integration_id=integration.id,
+                    kind="recovered",
+                    severity="low",
+                    message="Previously reported failures have cleared.",
+                    occurred_at=now,
+                )
+            )
+        if previous_status == "failed":
+            database.add(
+                ApplicationEvent(
+                    integration_id=integration.id,
+                    kind="sync_recovered",
+                    severity="low",
+                    message="Application API synchronization recovered.",
+                    occurred_at=now,
+                )
+            )
         integration.last_sync_status = "healthy"
         integration.last_sync_error = None
     except (httpx.HTTPError, ValueError, TypeError) as error:
+        if previous_status != "failed":
+            database.add(
+                ApplicationEvent(
+                    integration_id=integration.id,
+                    kind="sync_failed",
+                    severity="high",
+                    message=f"Application API synchronization failed: {str(error)[:400]}",
+                    occurred_at=now,
+                )
+            )
         integration.last_sync_status = "failed"
         integration.last_sync_error = str(error)[:500]
-    integration.last_sync_at = datetime.now(UTC)
+    integration.last_sync_at = now
     await database.commit()
 
 
@@ -282,6 +365,80 @@ async def create_application(
     await database.flush()
     await sync_application(database, item)
     return await application_view(database, item)
+
+
+@router.get("/events", response_model=list[ApplicationEventView])
+async def list_application_events(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[ApplicationEventView]:
+    rows = (
+        await database.execute(
+            select(ApplicationEvent, ApplicationIntegration)
+            .join(
+                ApplicationIntegration, ApplicationIntegration.id == ApplicationEvent.integration_id
+            )
+            .order_by(ApplicationEvent.occurred_at.desc())
+            .limit(500)
+        )
+    ).all()
+    return [
+        ApplicationEventView(
+            id=event.id,
+            integration_id=event.integration_id,
+            application_name=integration.name,
+            application_kind=integration.kind,
+            kind=event.kind,
+            severity=event.severity,
+            message=event.message,
+            acknowledged_at=event.acknowledged_at,
+            occurred_at=event.occurred_at,
+        )
+        for event, integration in rows
+    ]
+
+
+@router.post("/events/{event_id}/acknowledge", response_model=ApplicationEventView)
+async def acknowledge_application_event(
+    event_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> ApplicationEventView:
+    row = (
+        await database.execute(
+            select(ApplicationEvent, ApplicationIntegration)
+            .join(
+                ApplicationIntegration, ApplicationIntegration.id == ApplicationEvent.integration_id
+            )
+            .where(ApplicationEvent.id == event_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "application event not found")
+    event, integration = row
+    if event.acknowledged_at is None:
+        event.acknowledged_at = datetime.now(UTC)
+        event.acknowledged_by = auth[0].id
+        database.add(
+            AuditEvent(
+                actor_user_id=auth[0].id,
+                action="application.event.acknowledge",
+                target_type="application_event",
+                target_id=str(event.id),
+            )
+        )
+        await database.commit()
+    return ApplicationEventView(
+        id=event.id,
+        integration_id=event.integration_id,
+        application_name=integration.name,
+        application_kind=integration.kind,
+        kind=event.kind,
+        severity=event.severity,
+        message=event.message,
+        acknowledged_at=event.acknowledged_at,
+        occurred_at=event.occurred_at,
+    )
 
 
 @router.post("/{integration_id}/sync", response_model=ApplicationView)
