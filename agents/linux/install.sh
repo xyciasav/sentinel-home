@@ -43,9 +43,9 @@ Restart=always
 RestartSec=10
 NoNewPrivileges=false
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=false
 ProtectHome=true
-ReadWritePaths=/var/lib/sentinel-agent /var/lib/apt /var/lib/dpkg /var/cache/apt /var/log/apt /etc/apt /usr /lib /bin /sbin
+ReadWritePaths=/var/lib/sentinel-agent
 
 [Install]
 WantedBy=multi-user.target

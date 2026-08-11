@@ -279,10 +279,9 @@ function ActionCard({
       {item.affected_package && <p className="package-evidence"><b>{item.affected_package}</b> {item.installed_version || "unknown"} → {item.fixed_version || "fix not published"}</p>}
       <p>{item.required_action || "Review the vendor advisory and package evidence."}{item.action_due && ` Due ${item.action_due}.`}</p>
       {item.plan
-        ? <div className="automation-locked"><b>Plan {item.plan.status}</b><span>{item.plan.operation}: {item.plan.package_name} {item.plan.installed_version} → {item.plan.target_version}</span></div>
+        ? <details className="plan-details" open={item.plan.status==="dispatched"||item.plan.status==="failed"}><summary><b>Plan {item.plan.status}</b><span>{item.plan.package_name} {item.plan.installed_version} → repository upgrade</span></summary><ol><li className={["approved","queued","dispatched","completed","failed"].includes(item.plan.status)?"done":""}>Approval recorded</li><li className={["queued","dispatched","completed","failed"].includes(item.plan.status)?"done":""}>Released to agent</li><li className={item.plan.status==="dispatched"?"active":["completed","failed"].includes(item.plan.status)?"done":""}>Repair package state and install repository candidate</li><li className={item.plan.status==="completed"?"done":item.plan.status==="failed"?"failed":""}>Verify result</li></ol>{item.plan.result_output?<div className="execution-output"><b>{item.plan.status==="dispatched"?"Live agent output":"Execution output"}</b><pre>{item.plan.result_output}</pre></div>:item.plan.status==="dispatched"?<p className="quiet">Waiting for the agent’s first progress update…</p>:null}</details>
         : <div className="automation-locked"><b>{item.automation_ready ? "Plan available" : "Automation locked"}</b><span>{item.automation_blocker}</span></div>}
       {item.plan?.result_error && <div className="error action-error">{item.plan.result_error}</div>}
-      {item.plan?.result_output && <details className="execution-output"><summary>Execution output</summary><pre>{item.plan.result_output}</pre></details>}
       {error && <div className="error action-error">{error}</div>}
     </div>
     <div className="action-state">

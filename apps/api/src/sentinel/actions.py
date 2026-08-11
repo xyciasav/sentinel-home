@@ -21,7 +21,7 @@ from sentinel.models import (
 )
 
 router = APIRouter(prefix="/api/v1/actions", tags=["action center"])
-REQUIRED_EXECUTOR_VERSION = "0.2.0"
+REQUIRED_EXECUTOR_VERSION = "0.3.0"
 
 
 class RemediationPlanView(BaseModel):

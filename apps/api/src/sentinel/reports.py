@@ -255,7 +255,7 @@ async def overview_report(
             for item in agents
         ),
         agents_current=sum(
-            item.version == "0.5.2" and item.executor_version == "0.2.0" for item in agents
+            item.version == "0.6.0" and item.executor_version == "0.3.0" for item in agents
         ),
         package_vulnerabilities=int(
             await scalar(

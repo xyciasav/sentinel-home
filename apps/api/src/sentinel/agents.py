@@ -145,6 +145,10 @@ class CommandResultInput(BaseModel):
     error: str | None = Field(default=None, max_length=500)
 
 
+class CommandProgressInput(BaseModel):
+    output: str = Field(max_length=12_000)
+
+
 def command_payload(plan: RemediationPlan) -> dict[str, str]:
     return {
         "id": str(plan.id),
@@ -311,7 +315,7 @@ async def next_command(
     database: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[Agent, Depends(authenticated_agent)],
 ) -> CommandView | None:
-    if agent.executor_version != "0.2.0":
+    if agent.executor_version != "0.3.0":
         return None
     retry_before = datetime.now(UTC) - timedelta(minutes=5)
     plan = await database.scalar(
@@ -360,6 +364,26 @@ async def command_result(
         finding = await database.get(VulnerabilityFinding, plan.finding_id)
         if finding is not None:
             finding.status = "resolved"
+    await database.commit()
+
+
+@router.put("/commands/{plan_id}/progress", status_code=204)
+async def command_progress(
+    plan_id: uuid.UUID,
+    payload: CommandProgressInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    agent: Annotated[Agent, Depends(authenticated_agent)],
+) -> None:
+    plan = await database.scalar(
+        select(RemediationPlan).where(
+            RemediationPlan.id == plan_id,
+            RemediationPlan.agent_id == agent.id,
+            RemediationPlan.status == "dispatched",
+        )
+    )
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "active remediation command not found")
+    plan.result_output = payload.output
     await database.commit()
 
 

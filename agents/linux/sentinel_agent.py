@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import platform
+import selectors
 import shutil
 import stat
 import subprocess
@@ -17,17 +18,21 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 
 
-def request(url: str, payload: dict | None, token: str | None = None) -> dict:
+def request(
+    url: str, payload: dict | None, token: str | None = None, method: str | None = None
+) -> dict:
     if not url.startswith(("https://", "http://")):
         raise ValueError("unsupported server URL scheme")
     data = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json", "User-Agent": f"sentinel-linux-agent/{VERSION}"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    outbound = urllib.request.Request(url, data=data, headers=headers)  # noqa: S310
+    outbound = urllib.request.Request(  # noqa: S310
+        url, data=data, headers=headers, method=method
+    )
     with urllib.request.urlopen(outbound, timeout=30) as response:  # noqa: S310
         body = response.read()
         return json.loads(body) if body else {}
@@ -44,7 +49,7 @@ def verify_command(command: dict, token: str) -> bool:
     return hmac.compare_digest(expected, str(command.get("signature", "")))
 
 
-def run_command(command: dict, token: str) -> dict[str, str | None]:
+def run_command(command: dict, token: str, base_url: str) -> dict[str, str | None]:
     if not verify_command(command, token):
         return {"status": "failed", "output": "", "error": "invalid command signature"}
     if command["operation"] != "package_upgrade":
@@ -54,19 +59,52 @@ def run_command(command: dict, token: str) -> dict[str, str | None]:
         for field in ("operation", "package_name", "installed_version", "target_version")
     }
     try:
-        result = subprocess.run(  # noqa: S603
+        process = subprocess.Popen(  # noqa: S603
             ["/usr/bin/sudo", "-n", "/usr/local/libexec/sentinel-remediate"],
-            input=json.dumps(helper_payload),
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=1_000,
-            check=False,
         )
-        output = (result.stdout + result.stderr)[-12_000:]
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write(json.dumps(helper_payload))
+        process.stdin.close()
+        lines = []
+        last_report = 0.0
+        deadline = time.monotonic() + 1_000
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while process.poll() is None:
+            if time.monotonic() >= deadline:
+                process.kill()
+                raise subprocess.TimeoutExpired(process.args, 1_000)
+            events = selector.select(timeout=1)
+            if not events:
+                continue
+            line = process.stdout.readline()
+            if not line:
+                continue
+            lines.append(line)
+            output = "".join(lines)[-12_000:]
+            if time.time() - last_report >= 2:
+                try:
+                    request(
+                        f"{base_url}/api/v1/agents/commands/{command['id']}/progress",
+                        {"output": output},
+                        token,
+                        method="PUT",
+                    )
+                except (OSError, ValueError, urllib.error.URLError):
+                    pass
+                last_report = time.time()
+        lines.append(process.stdout.read())
+        selector.close()
+        return_code = process.wait(timeout=30)
+        output = "".join(lines)[-12_000:]
         return {
-            "status": "completed" if result.returncode == 0 else "failed",
+            "status": "completed" if return_code == 0 else "failed",
             "output": output,
-            "error": None if result.returncode == 0 else f"helper exited {result.returncode}",
+            "error": None if return_code == 0 else f"helper exited {return_code}",
         }
     except (OSError, subprocess.SubprocessError) as error:
         return {"status": "failed", "output": "", "error": str(error)[:500]}
@@ -260,7 +298,7 @@ def main() -> None:
                 next_containers = now + 300
             command = request(f"{base_url}/api/v1/agents/commands/next", None, token)
             if command:
-                result = run_command(command, token)
+                result = run_command(command, token, base_url)
                 request(
                     f"{base_url}/api/v1/agents/commands/{command['id']}/result",
                     result,
