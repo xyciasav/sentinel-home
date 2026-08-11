@@ -180,8 +180,21 @@ async def fetch_home_assistant(source: InventorySource) -> list[dict]:
 
 
 async def fetch_pihole(source: InventorySource) -> tuple[list[dict], dict]:
-    password = decrypt_secret(source.credential_encrypted)
+    credential = decrypt_secret(source.credential_encrypted)
     base_url = pihole_api_base(source.base_url)
+    try:
+        return await fetch_pihole_v6(base_url, credential)
+    except (httpx.HTTPError, RuntimeError, ValueError) as v6_error:
+        try:
+            return await fetch_pihole_v5(base_url, credential)
+        except (httpx.HTTPError, RuntimeError, ValueError) as legacy_error:
+            raise RuntimeError(
+                "Pi-hole authentication failed for both the v6 application-password API "
+                f"and legacy API token ({legacy_error})"
+            ) from v6_error
+
+
+async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dict]:
     async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
         authentication = await client.post(f"{base_url}/api/auth", json={"password": password})
         authentication.raise_for_status()
@@ -215,6 +228,63 @@ async def fetch_pihole(source: InventorySource) -> tuple[list[dict], dict]:
         "gravity": raw_summary.get("gravity") or {},
     }
     return parse_pihole_devices(devices_response.json().get("devices", [])), summary
+
+
+async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
+    async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
+        summary_response, clients_response = await asyncio.gather(
+            client.get(
+                f"{base_url}/admin/api.php",
+                params={"summaryRaw": "", "auth": token},
+            ),
+            client.get(
+                f"{base_url}/admin/api.php",
+                params={"getQuerySources": "", "auth": token},
+            ),
+        )
+        for response in (summary_response, clients_response):
+            response.raise_for_status()
+    try:
+        raw_summary = summary_response.json()
+        raw_clients = clients_response.json()
+    except ValueError as error:
+        raise RuntimeError("legacy Pi-hole API token returned a non-JSON response") from error
+    if not isinstance(raw_summary, dict) or "status" not in raw_summary:
+        raise RuntimeError("legacy Pi-hole API token was rejected")
+    top_sources = raw_clients.get("top_sources", raw_clients)
+    devices = []
+    if isinstance(top_sources, dict):
+        for identity in top_sources:
+            parts = str(identity).split("|")
+            address = next((part for part in parts if _private_address(part)), None)
+            if not address:
+                continue
+            hostname = next((part for part in parts if part != address and part), None)
+            devices.append(
+                {
+                    "external_id": address,
+                    "name": (hostname or address)[:255],
+                    "address": address[:45],
+                    "mac_address": None,
+                    "manufacturer": None,
+                    "model": "Pi-hole DNS client",
+                    "area_name": "Pi-hole v5 API",
+                }
+            )
+    summary = {
+        "blocking": raw_summary.get("status") == "enabled",
+        "queries": {
+            "total": raw_summary.get("dns_queries_today", 0),
+            "blocked": raw_summary.get("ads_blocked_today", 0),
+            "percent_blocked": raw_summary.get("ads_percentage_today", 0),
+        },
+        "clients": {
+            "active": raw_summary.get("unique_clients", 0),
+            "total": raw_summary.get("clients_ever_seen", 0),
+        },
+        "gravity": {"domains_being_blocked": raw_summary.get("domains_being_blocked", 0)},
+    }
+    return devices, summary
 
 
 def parse_pihole_devices(devices: list[dict]) -> list[dict]:
