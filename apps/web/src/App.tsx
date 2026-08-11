@@ -40,6 +40,11 @@ export function App() {
     const timer = window.setInterval(() => { void loadDevices(); void loadMonitors(); void loadIncidents(); void loadNotifications(); }, 10000);
     return () => window.clearInterval(timer);
   }, [view]);
+  useEffect(() => {
+    if (view !== "dashboard" || page !== "actions") return;
+    const timer = window.setInterval(() => { void loadActions(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [view, page]);
 
   async function initialize() {
     try {

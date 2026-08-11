@@ -1,10 +1,13 @@
+import hashlib
+import hmac
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
@@ -16,8 +19,10 @@ from sentinel.models import (
     AuditEvent,
     Device,
     InstalledPackage,
+    RemediationPlan,
     Session,
     User,
+    VulnerabilityFinding,
 )
 from sentinel.security import create_secret, hash_secret
 
@@ -107,6 +112,36 @@ class PackageView(BaseModel):
     source_name: str | None
     source_version: str | None
     observed_at: datetime
+
+
+class CommandView(BaseModel):
+    id: uuid.UUID
+    operation: str
+    package_name: str
+    installed_version: str
+    target_version: str
+    signature: str
+
+
+class CommandResultInput(BaseModel):
+    status: str = Field(pattern=r"^(completed|failed)$")
+    output: str = Field(default="", max_length=12_000)
+    error: str | None = Field(default=None, max_length=500)
+
+
+def command_payload(plan: RemediationPlan) -> dict[str, str]:
+    return {
+        "id": str(plan.id),
+        "operation": plan.operation,
+        "package_name": plan.package_name,
+        "installed_version": plan.installed_version,
+        "target_version": plan.target_version,
+    }
+
+
+def sign_command(plan: RemediationPlan, agent: Agent) -> str:
+    body = json.dumps(command_payload(plan), sort_keys=True, separators=(",", ":")).encode()
+    return hmac.new(bytes.fromhex(agent.credential_fingerprint), body, hashlib.sha256).hexdigest()
 
 
 async def authenticated_agent(
@@ -242,6 +277,61 @@ async def heartbeat(
             InstalledPackage(agent_id=agent.id, observed_at=now, **item.model_dump())
             for item in unique_packages.values()
         )
+    await database.commit()
+
+
+@router.get("/commands/next", response_model=CommandView | None)
+async def next_command(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    agent: Annotated[Agent, Depends(authenticated_agent)],
+) -> CommandView | None:
+    retry_before = datetime.now(UTC) - timedelta(minutes=5)
+    plan = await database.scalar(
+        select(RemediationPlan)
+        .where(
+            RemediationPlan.agent_id == agent.id,
+            or_(
+                RemediationPlan.status == "queued",
+                (RemediationPlan.status == "dispatched")
+                & (RemediationPlan.dispatched_at < retry_before),
+            ),
+        )
+        .order_by(RemediationPlan.approved_at, RemediationPlan.created_at)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+    if plan is None:
+        return None
+    plan.status = "dispatched"
+    plan.dispatched_at = datetime.now(UTC)
+    await database.commit()
+    return CommandView(**command_payload(plan), signature=sign_command(plan, agent))
+
+
+@router.post("/commands/{plan_id}/result", status_code=204)
+async def command_result(
+    plan_id: uuid.UUID,
+    payload: CommandResultInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    agent: Annotated[Agent, Depends(authenticated_agent)],
+) -> None:
+    plan = await database.scalar(
+        select(RemediationPlan)
+        .where(RemediationPlan.id == plan_id, RemediationPlan.agent_id == agent.id)
+        .with_for_update()
+    )
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "remediation command not found")
+    if plan.status != "dispatched":
+        raise HTTPException(status.HTTP_409_CONFLICT, "remediation command is not dispatched")
+    plan.status = payload.status
+    plan.result_output = payload.output
+    plan.result_error = payload.error
+    plan.completed_at = datetime.now(UTC)
+    if payload.status == "completed":
+        finding = await database.get(VulnerabilityFinding, plan.finding_id)
+        if finding is not None:
+            finding.status = "resolved"
     await database.commit()
 
 

@@ -1,15 +1,41 @@
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from sentinel.agents import HeartbeatInput
+from sentinel.agents import HeartbeatInput, sign_command
+from sentinel.security import hash_secret
 
 
 def test_linux_agent_postpones_newer_type_annotation_evaluation() -> None:
     source = Path("agents/linux/sentinel_agent.py").read_text(encoding="utf-8")
 
     assert "from __future__ import annotations" in source
-    assert 'VERSION = "0.3.0"' in source
+    assert 'VERSION = "0.4.0"' in source
+    assert "verify_command" in source
+
+
+def test_remediation_helper_has_no_shell_execution_surface() -> None:
+    source = Path("agents/linux/sentinel_remediate.py").read_text(encoding="utf-8")
+
+    assert "shell=True" not in source
+    assert 'payload["operation"] != "package_upgrade"' in source
+    assert '["/usr/bin/apt-get", "update"]' in source
+
+
+def test_remediation_commands_are_bound_to_agent_credential() -> None:
+    plan = SimpleNamespace(
+        id=uuid4(),
+        operation="package_upgrade",
+        package_name="openssl",
+        installed_version="1.0",
+        target_version="1.1",
+    )
+    first = SimpleNamespace(credential_fingerprint=hash_secret("first-token"))
+    second = SimpleNamespace(credential_fingerprint=hash_secret("second-token"))
+
+    assert sign_command(plan, first) != sign_command(plan, second)
 
 
 def test_agent_heartbeat_validates_resource_ranges() -> None:

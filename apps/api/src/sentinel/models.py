@@ -417,6 +417,10 @@ class RemediationPlan(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result_output: Mapped[str | None] = mapped_column(Text)
+    result_error: Mapped[str | None] = mapped_column(String(500))
 
 
 class AuditEvent(Base):

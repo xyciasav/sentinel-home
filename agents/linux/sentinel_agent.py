@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import platform
@@ -15,13 +17,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
-def request(url: str, payload: dict, token: str | None = None) -> dict:
+def request(url: str, payload: dict | None, token: str | None = None) -> dict:
     if not url.startswith(("https://", "http://")):
         raise ValueError("unsupported server URL scheme")
-    data = json.dumps(payload).encode()
+    data = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json", "User-Agent": f"sentinel-linux-agent/{VERSION}"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -29,6 +31,45 @@ def request(url: str, payload: dict, token: str | None = None) -> dict:
     with urllib.request.urlopen(outbound, timeout=30) as response:  # noqa: S310
         body = response.read()
         return json.loads(body) if body else {}
+
+
+def verify_command(command: dict, token: str) -> bool:
+    fields = ("id", "operation", "package_name", "installed_version", "target_version")
+    if any(not isinstance(command.get(field), str) for field in fields):
+        return False
+    payload = {field: command[field] for field in fields}
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    key = bytes.fromhex(hashlib.sha256(token.encode()).hexdigest())
+    expected = hmac.new(key, body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, str(command.get("signature", "")))
+
+
+def run_command(command: dict, token: str) -> dict[str, str | None]:
+    if not verify_command(command, token):
+        return {"status": "failed", "output": "", "error": "invalid command signature"}
+    if command["operation"] != "package_upgrade":
+        return {"status": "failed", "output": "", "error": "unsupported operation"}
+    helper_payload = {
+        field: command[field]
+        for field in ("operation", "package_name", "installed_version", "target_version")
+    }
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["/usr/bin/sudo", "-n", "/usr/local/libexec/sentinel-remediate"],
+            input=json.dumps(helper_payload),
+            capture_output=True,
+            text=True,
+            timeout=1_000,
+            check=False,
+        )
+        output = (result.stdout + result.stderr)[-12_000:]
+        return {
+            "status": "completed" if result.returncode == 0 else "failed",
+            "output": output,
+            "error": None if result.returncode == 0 else f"helper exited {result.returncode}",
+        }
+    except (OSError, subprocess.SubprocessError) as error:
+        return {"status": "failed", "output": "", "error": str(error)[:500]}
 
 
 def cpu_sample() -> tuple[int, int]:
@@ -172,6 +213,15 @@ def main() -> None:
             request(f"{base_url}/api/v1/agents/heartbeat", telemetry(include_packages), token)
             if include_packages:
                 next_packages = now + 21_600
+            command = request(f"{base_url}/api/v1/agents/commands/next", None, token)
+            if command:
+                result = run_command(command, token)
+                request(
+                    f"{base_url}/api/v1/agents/commands/{command['id']}/result",
+                    result,
+                    token,
+                )
+                next_packages = 0.0
         except (OSError, ValueError, subprocess.SubprocessError, urllib.error.URLError) as error:
             print(f"heartbeat failed: {error}", flush=True)
         if args.once:

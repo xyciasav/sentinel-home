@@ -14,7 +14,7 @@ export function ActionsPage({
 }) {
   const [localItems, setLocalItems] = useState(items);
   const [busy, setBusy] = useState("");
-  const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "">("");
+  const [bulkBusy, setBulkBusy] = useState<"build" | "approve" | "release" | "">("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -56,10 +56,11 @@ export function ActionsPage({
     setLocalItems(current => current.map(item => item.finding_id === findingId ? {...item, ...change} : item));
   }
 
-  const actionable = visible.filter(item => item.automation_ready && (!item.plan || item.plan.status === "draft"));
+  const actionable = visible.filter(item => item.automation_ready && (!item.plan || ["draft", "approved"].includes(item.plan.status)));
   const selectedItems = localItems.filter(item => selected.has(item.finding_id));
   const selectedBuildable = selectedItems.filter(item => item.automation_ready && !item.plan);
   const selectedDrafts = selectedItems.filter(item => item.plan?.status === "draft");
+  const selectedApproved = selectedItems.filter(item => item.plan?.status === "approved");
 
   function toggle(findingId: string) {
     setSelected(current => {
@@ -139,6 +140,25 @@ export function ActionsPage({
     void refresh();
   }
 
+  async function releaseSelected() {
+    if (!selectedApproved.length || !window.confirm(
+      `Run ${selectedApproved.length} approved package upgrades on their Linux systems? The agents will install the exact reviewed versions.`
+    )) return;
+    setBulkBusy("release");
+    for (const item of selectedApproved) {
+      if (!item.plan) continue;
+      try {
+        const plan = await api.releaseRemediationPlan(item.plan.id, csrf);
+        replaceItem(item.finding_id, {plan});
+      } catch (reason) {
+        setErrors(current => ({...current,[item.finding_id]:reason instanceof Error?reason.message:"Unable to release plan"}));
+      }
+    }
+    setSelected(new Set());
+    setBulkBusy("");
+    void refresh();
+  }
+
   return <>
     <header><div><p className="eyebrow">IDENTIFY · APPROVE · VERIFY</p><h1>Action Center</h1><p>Prioritized Linux remediation with exact package evidence and an auditable approval gate.</p></div></header>
     <div className="notice panel"><b>Execution safety:</b> Approved plans enter the executor queue, but remain non-executing until the restricted root helper and signed agent protocol are installed.</div>
@@ -147,7 +167,7 @@ export function ActionsPage({
       <label>Severity<select value={severity} onChange={event => setSeverity(event.target.value)}><option value="all">All</option>{["critical", "high", "medium", "low", "unknown"].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Device<select value={device} onChange={event => setDevice(event.target.value)}><option value="all">All</option>{devices.map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Readiness<select value={readiness} onChange={event => setReadiness(event.target.value)}><option value="all">All</option><option value="ready">Playbook ready</option><option value="locked">Locked</option></select></label>
-      <label>Plan status<select value={planStatus} onChange={event => setPlanStatus(event.target.value)}><option value="all">All</option><option value="ready">Not built</option><option value="draft">Draft</option><option value="approved">Approved queue</option><option value="locked">Locked</option></select></label>
+      <label>Plan status<select value={planStatus} onChange={event => setPlanStatus(event.target.value)}><option value="all">All</option><option value="ready">Not built</option><option value="draft">Draft</option><option value="approved">Approved</option><option value="queued">Queued</option><option value="dispatched">Executing</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="locked">Locked</option></select></label>
       <label>Group by<select value={groupBy} onChange={event => setGroupBy(event.target.value)}><option value="none">None</option><option value="device">Device</option><option value="severity">Severity</option><option value="status">Plan status</option></select></label>
       <b>{visible.length} of {localItems.length}</b>
     </div>
@@ -157,6 +177,7 @@ export function ActionsPage({
       <button onClick={() => setSelected(new Set())} disabled={!selected.size}>Clear</button>
       <button className="bulk-primary" onClick={() => void buildSelected()} disabled={!selectedBuildable.length || !!bulkBusy}>{bulkBusy === "build" ? "Building…" : `Build selected (${selectedBuildable.length})`}</button>
       <button className="bulk-primary" onClick={() => void approveSelected()} disabled={!selectedDrafts.length || !!bulkBusy}>{bulkBusy === "approve" ? "Approving…" : `Approve selected (${selectedDrafts.length})`}</button>
+      <button className="bulk-danger" onClick={() => void releaseSelected()} disabled={!selectedApproved.length || !!bulkBusy}>{bulkBusy === "release" ? "Releasing…" : `Run selected (${selectedApproved.length})`}</button>
     </div>
     {localItems.length === 0
       ? <div className="empty-state panel"><h2>No active remediation work</h2><p>Open or investigating vulnerability findings will appear here.</p></div>
@@ -195,7 +216,7 @@ function ActionCard({
   build: (item: ActionItem) => Promise<void>;
   approve: (item: ActionItem) => Promise<void>;
 }) {
-  const selectable = item.automation_ready && (!item.plan || item.plan.status === "draft");
+  const selectable = item.automation_ready && (!item.plan || ["draft", "approved"].includes(item.plan.status));
   return <article className={`panel action-item ${item.known_exploited ? "urgent" : ""} ${selected ? "selected" : ""}`}>
     <div className="action-priority"><label className="action-select"><input type="checkbox" checked={selected} disabled={!selectable} onChange={() => toggle(item.finding_id)} /><span>Select</span></label><strong>{item.priority}</strong><small>PRIORITY</small></div>
     <div>
@@ -206,6 +227,8 @@ function ActionCard({
       {item.plan
         ? <div className="automation-locked"><b>Plan {item.plan.status}</b><span>{item.plan.operation}: {item.plan.package_name} {item.plan.installed_version} → {item.plan.target_version}</span></div>
         : <div className="automation-locked"><b>{item.automation_ready ? "Plan available" : "Automation locked"}</b><span>{item.automation_blocker}</span></div>}
+      {item.plan?.result_error && <div className="error action-error">{item.plan.result_error}</div>}
+      {item.plan?.result_output && <details className="execution-output"><summary>Execution output</summary><pre>{item.plan.result_output}</pre></details>}
       {error && <div className="error action-error">{error}</div>}
     </div>
     <div className="action-state">
@@ -214,7 +237,7 @@ function ActionCard({
         ? <button onClick={() => void build(item)} disabled={!item.automation_ready || busy === item.finding_id}>{busy === item.finding_id ? "Building…" : "Build playbook"}</button>
         : item.plan.status === "draft"
           ? <button className="primary compact" onClick={() => void approve(item)} disabled={busy === item.plan.id}>{busy === item.plan.id ? "Approving…" : "Review & approve"}</button>
-          : <button disabled>{item.plan.status === "approved" ? "Queued for executor" : item.plan.status}</button>}
+          : <button disabled>{item.plan.status === "approved" ? "Select to run" : item.plan.status === "queued" || item.plan.status === "dispatched" ? "Executing" : item.plan.status}</button>}
     </div>
   </article>;
 }

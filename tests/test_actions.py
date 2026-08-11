@@ -29,6 +29,10 @@ def test_remediation_plan_view_accepts_database_model_attributes() -> None:
         status="draft",
         created_at=datetime.now(UTC),
         approved_at=None,
+        dispatched_at=None,
+        completed_at=None,
+        result_output=None,
+        result_error=None,
     )
 
     assert RemediationPlanView.model_validate(plan).package_name == "openssl"

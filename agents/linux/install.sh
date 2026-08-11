@@ -11,6 +11,11 @@ python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)
 id sentinel-agent >/dev/null 2>&1 || useradd --system --home-dir /var/lib/sentinel-agent --shell /usr/sbin/nologin sentinel-agent
 install -d -o sentinel-agent -g sentinel-agent -m 0700 /var/lib/sentinel-agent
 install -m 0755 ./sentinel_agent.py /usr/local/bin/sentinel-agent
+install -d -o root -g root -m 0755 /usr/local/libexec
+install -o root -g root -m 0755 ./sentinel_remediate.py /usr/local/libexec/sentinel-remediate
+printf '%s\n' 'sentinel-agent ALL=(root) NOPASSWD: /usr/local/libexec/sentinel-remediate' >/etc/sudoers.d/sentinel-agent
+chmod 0440 /etc/sudoers.d/sentinel-agent
+command -v visudo >/dev/null && visudo -cf /etc/sudoers.d/sentinel-agent
 
 allow_http="${SENTINEL_ALLOW_HTTP:-false}"
 runuser -u sentinel-agent -- env SENTINEL_URL="$SENTINEL_URL" SENTINEL_ENROLLMENT_TOKEN="$SENTINEL_ENROLLMENT_TOKEN" SENTINEL_ALLOW_HTTP="$allow_http" /usr/local/bin/sentinel-agent --state /var/lib/sentinel-agent/token --enroll-only
@@ -35,11 +40,11 @@ EnvironmentFile=/etc/sentinel-agent.env
 ExecStart=/usr/local/bin/sentinel-agent
 Restart=always
 RestartSec=10
-NoNewPrivileges=true
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/sentinel-agent
+ReadWritePaths=/var/lib/sentinel-agent /var/lib/apt /var/cache/apt /etc/apt /usr /lib /bin /sbin
 
 [Install]
 WantedBy=multi-user.target

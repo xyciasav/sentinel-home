@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
@@ -13,6 +13,7 @@ from sentinel.models import (
     Agent,
     AuditEvent,
     Device,
+    InstalledPackage,
     RemediationPlan,
     Session,
     User,
@@ -35,6 +36,10 @@ class RemediationPlanView(BaseModel):
     status: str
     created_at: datetime
     approved_at: datetime | None
+    dispatched_at: datetime | None
+    completed_at: datetime | None
+    result_output: str | None
+    result_error: str | None
 
 
 class ActionItemView(BaseModel):
@@ -80,7 +85,12 @@ async def list_actions(
             .outerjoin(Device, Device.id == VulnerabilityFinding.device_id)
             .outerjoin(Agent, (Agent.device_id == Device.id) & Agent.revoked_at.is_(None))
             .outerjoin(RemediationPlan, RemediationPlan.finding_id == VulnerabilityFinding.id)
-            .where(VulnerabilityFinding.status.in_(("open", "investigating")))
+            .where(
+                or_(
+                    VulnerabilityFinding.status.in_(("open", "investigating")),
+                    RemediationPlan.id.is_not(None),
+                )
+            )
         )
     ).all()
     items = [
@@ -155,11 +165,26 @@ async def build_plan(
     )
     if agent is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "active Linux agent required")
+    binary_packages = list(
+        await database.scalars(
+            select(InstalledPackage)
+            .where(
+                InstalledPackage.agent_id == agent.id,
+                InstalledPackage.source_name == finding.affected_package,
+                InstalledPackage.source_version == finding.installed_version,
+            )
+            .order_by(InstalledPackage.name)
+        )
+    )
+    binary_package = next(
+        (item for item in binary_packages if item.name == finding.affected_package),
+        next((item for item in binary_packages if not item.name.endswith("-dev")), None),
+    )
     plan = RemediationPlan(
         finding_id=finding.id,
         agent_id=agent.id,
-        package_name=finding.affected_package,
-        installed_version=finding.installed_version,
+        package_name=binary_package.name if binary_package else finding.affected_package,
+        installed_version=binary_package.version if binary_package else finding.installed_version,
         target_version=finding.fixed_version,
         created_by=auth[0].id,
         created_at=datetime.now(UTC),
@@ -198,6 +223,33 @@ async def approve_plan(
         AuditEvent(
             actor_user_id=auth[0].id,
             action="remediation.plan.approve",
+            target_type="remediation_plan",
+            target_id=str(plan.id),
+        )
+    )
+    await database.commit()
+    await database.refresh(plan)
+    return plan
+
+
+@router.post("/plans/{plan_id}/release", response_model=RemediationPlanView)
+async def release_plan(
+    plan_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> RemediationPlan:
+    plan = await database.scalar(
+        select(RemediationPlan).where(RemediationPlan.id == plan_id).with_for_update()
+    )
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "remediation plan not found")
+    if plan.status != "approved":
+        raise HTTPException(status.HTTP_409_CONFLICT, "only approved plans can be released")
+    plan.status = "queued"
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="remediation.plan.release",
             target_type="remediation_plan",
             target_id=str(plan.id),
         )
