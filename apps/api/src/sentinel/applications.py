@@ -1,9 +1,11 @@
 import asyncio
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import httpx
+from defusedxml import ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import select
@@ -20,9 +22,10 @@ router = APIRouter(prefix="/api/v1/applications", tags=["application insights"])
 
 class ApplicationInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    kind: str = Field(pattern=r"^(sonarr|radarr|sabnzbd)$")
+    kind: str = Field(pattern=r"^(sonarr|radarr|prowlarr|sabnzbd|plex|qbittorrent)$")
     base_url: AnyHttpUrl
     api_key: str = Field(min_length=1, max_length=1000)
+    username: str | None = Field(default=None, max_length=255)
 
 
 class SnapshotView(BaseModel):
@@ -50,7 +53,12 @@ class ApplicationView(BaseModel):
 
 async def collect(integration: ApplicationIntegration) -> dict:
     base = integration.base_url.rstrip("/")
-    key = decrypt_secret(integration.credential_encrypted)
+    secret = decrypt_secret(integration.credential_encrypted)
+    try:
+        credential = json.loads(secret)
+        key, username = credential["secret"], credential.get("username")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        key, username = secret, None
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
         if integration.kind in {"sonarr", "radarr"}:
             headers = {"X-Api-Key": key}
@@ -95,6 +103,85 @@ async def collect(integration: ApplicationIntegration) -> dict:
                 "item_count": len(items),
                 "active_count": sum(bool(item.get("monitored")) for item in items),
                 "disk_free_bytes": sum(int(item.get("freeSpace") or 0) for item in disks),
+            }
+        if integration.kind == "prowlarr":
+            headers = {"X-Api-Key": key}
+            prefix = f"{base}/api/v1"
+            system, indexers, indexer_status, health = await asyncio.gather(
+                client.get(f"{prefix}/system/status", headers=headers),
+                client.get(f"{prefix}/indexer", headers=headers),
+                client.get(f"{prefix}/indexerstatus", headers=headers),
+                client.get(f"{prefix}/health", headers=headers),
+            )
+            for response in (system, indexers, indexer_status, health):
+                response.raise_for_status()
+            indexer_rows, status_rows, health_rows = (
+                indexers.json(),
+                indexer_status.json(),
+                health.json(),
+            )
+            return {
+                "version": str(system.json().get("version") or "")[:100] or None,
+                "queue_count": len(status_rows),
+                "failed_count": sum(item.get("type") == "error" for item in health_rows),
+                "item_count": len(indexer_rows),
+                "active_count": sum(bool(item.get("enable")) for item in indexer_rows),
+                "disk_free_bytes": None,
+            }
+        if integration.kind == "plex":
+            headers = {"X-Plex-Token": key, "Accept": "application/xml"}
+            identity, sections, sessions = await asyncio.gather(
+                client.get(f"{base}/identity", headers=headers),
+                client.get(f"{base}/library/sections", headers=headers),
+                client.get(f"{base}/status/sessions", headers=headers),
+            )
+            for response in (identity, sections, sessions):
+                response.raise_for_status()
+            identity_root, sections_root, sessions_root = (
+                ET.fromstring(identity.text),
+                ET.fromstring(sections.text),
+                ET.fromstring(sessions.text),
+            )
+            return {
+                "version": identity_root.attrib.get("version"),
+                "queue_count": 0,
+                "failed_count": 0,
+                "item_count": len(sections_root.findall("Directory")),
+                "active_count": int(sessions_root.attrib.get("size", "0")),
+                "disk_free_bytes": None,
+            }
+        if integration.kind == "qbittorrent":
+            login = await client.post(
+                f"{base}/api/v2/auth/login", data={"username": username or "admin", "password": key}
+            )
+            login.raise_for_status()
+            if login.text.strip() != "Ok.":
+                raise ValueError("qBittorrent authentication failed")
+            torrents, version = await asyncio.gather(
+                client.get(f"{base}/api/v2/torrents/info"), client.get(f"{base}/api/v2/app/version")
+            )
+            torrents.raise_for_status()
+            version.raise_for_status()
+            rows = torrents.json()
+            active_states = {
+                "downloading",
+                "uploading",
+                "stalledDL",
+                "stalledUP",
+                "checkingDL",
+                "checkingUP",
+                "forcedDL",
+                "forcedUP",
+            }
+            return {
+                "version": version.text.strip()[:100],
+                "queue_count": len(rows),
+                "failed_count": sum(
+                    item.get("state") in {"error", "missingFiles"} for item in rows
+                ),
+                "item_count": len(rows),
+                "active_count": sum(item.get("state") in active_states for item in rows),
+                "disk_free_bytes": None,
             }
         response = await client.get(
             f"{base}/api", params={"mode": "queue", "output": "json", "apikey": key}
@@ -181,7 +268,14 @@ async def create_application(
         name=payload.name.strip(),
         kind=payload.kind,
         base_url=safe_base_url(str(payload.base_url)),
-        credential_encrypted=encrypt_secret(payload.api_key.strip()),
+        credential_encrypted=encrypt_secret(
+            json.dumps(
+                {
+                    "secret": payload.api_key.strip(),
+                    "username": payload.username.strip() if payload.username else None,
+                }
+            )
+        ),
         created_by=auth[0].id,
     )
     database.add(item)
