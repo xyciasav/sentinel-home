@@ -105,6 +105,44 @@ class DeviceAddress(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class InventorySource(Base):
+    __tablename__ = "inventory_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[str] = mapped_column(String(30), default="home_assistant")
+    base_url: Mapped[str] = mapped_column(String(500))
+    credential_encrypted: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_status: Mapped[str] = mapped_column(String(30), default="never")
+    last_sync_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SourceDevice(Base):
+    __tablename__ = "source_devices"
+    __table_args__ = (
+        Index("ix_source_devices_source_external", "source_id", "external_id", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("inventory_sources.id", ondelete="CASCADE")
+    )
+    external_id: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(String(45))
+    mac_address: Mapped[str | None] = mapped_column(String(30))
+    manufacturer: Mapped[str | None] = mapped_column(String(100))
+    model: Mapped[str | None] = mapped_column(String(100))
+    area_name: Mapped[str | None] = mapped_column(String(100))
+    imported_device_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL")
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ServiceMonitor(Base):
     __tablename__ = "service_monitors"
 

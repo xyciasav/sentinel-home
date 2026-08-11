@@ -22,6 +22,7 @@ Sentinel Home is a self-hosted home-network observability and security platform 
 - One-time Linux agent enrollment with live CPU, memory, disk, uptime, and package inventory
 - Linux system-health history, distro identity, searchable packages, pressure highlighting, and 30-day metric retention
 - OSV-backed Debian/Ubuntu source-package vulnerability matching with installed and fixed versions
+- Home Assistant inventory sources for discovering router-tracked devices and selectively importing private addresses
 - Audited, approval-gated Linux package remediation plans (execution remains disabled)
 - Filterable Action Center with immediate playbook and approval state updates
 - Multi-select package findings for bulk playbook creation and approval
