@@ -160,6 +160,10 @@ class NetworkIdentityEvent(Base):
     name: Mapped[str] = mapped_column(String(255))
     old_value: Mapped[str | None] = mapped_column(String(255))
     new_value: Mapped[str | None] = mapped_column(String(255))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

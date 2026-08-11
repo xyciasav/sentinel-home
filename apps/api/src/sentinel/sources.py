@@ -100,6 +100,8 @@ class NetworkIdentityEventView(BaseModel):
     old_value: str | None
     new_value: str | None
     occurred_at: datetime
+    acknowledged_at: datetime | None
+    severity: str
 
 
 def safe_base_url(value: str) -> str:
@@ -586,9 +588,48 @@ async def network_activity(
             old_value=event.old_value,
             new_value=event.new_value,
             occurred_at=event.occurred_at,
+            acknowledged_at=event.acknowledged_at,
+            severity="medium" if event.kind == "identity_seen" else "low",
         )
         for event, source_name in rows
     ]
+
+
+@router.post("/network-activity/{event_id}/acknowledge", response_model=NetworkIdentityEventView)
+async def acknowledge_network_activity(
+    event_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> NetworkIdentityEventView:
+    event = await database.get(NetworkIdentityEvent, event_id)
+    if event is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "network event not found")
+    if event.acknowledged_at is None:
+        event.acknowledged_at = datetime.now(UTC)
+        event.acknowledged_by = auth[0].id
+        database.add(
+            AuditEvent(
+                actor_user_id=auth[0].id,
+                action="network.activity.acknowledge",
+                target_type="network_identity_event",
+                target_id=str(event.id),
+            )
+        )
+        await database.commit()
+    source_name = await database.scalar(
+        select(InventorySource.name).where(InventorySource.id == event.source_id)
+    )
+    return NetworkIdentityEventView(
+        id=event.id,
+        kind=event.kind,
+        name=event.name,
+        source_name=source_name or "Disconnected source",
+        old_value=event.old_value,
+        new_value=event.new_value,
+        occurred_at=event.occurred_at,
+        acknowledged_at=event.acknowledged_at,
+        severity="medium" if event.kind == "identity_seen" else "low",
+    )
 
 
 @router.post("/network-inventory/link", status_code=204)
