@@ -83,6 +83,12 @@ class NetworkAssetView(BaseModel):
     observations: int
     linked: bool
     last_seen_at: datetime | None
+    observation_ids: list[uuid.UUID]
+
+
+class LinkNetworkIdentityInput(BaseModel):
+    observation_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    device_id: uuid.UUID | None = None
 
 
 def safe_base_url(value: str) -> str:
@@ -500,6 +506,7 @@ async def network_inventory(
                 observations=len(linked),
                 linked=True,
                 last_seen_at=device.last_seen_at,
+                observation_ids=[item.id for item in linked],
             )
         )
     for identity, grouped in unlinked_groups.items():
@@ -515,9 +522,82 @@ async def network_inventory(
                 observations=len(grouped),
                 linked=False,
                 last_seen_at=max(item.last_seen_at for item in grouped),
+                observation_ids=[item.id for item in grouped],
             )
         )
     return sorted(result, key=lambda item: (not item.linked, item.name.lower()))
+
+
+@router.post("/network-inventory/link", status_code=204)
+async def link_network_identity(
+    payload: LinkNetworkIdentityInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    observations = list(
+        await database.scalars(
+            select(SourceDevice).where(SourceDevice.id.in_(set(payload.observation_ids)))
+        )
+    )
+    if len(observations) != len(set(payload.observation_ids)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "network observation not found")
+    device = await database.get(Device, payload.device_id) if payload.device_id else None
+    if payload.device_id and device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "target device not found")
+    recent = max(observations, key=lambda item: item.last_seen_at)
+    address = next((item.address for item in observations if item.address), None)
+    mac = next((item.mac_address.lower() for item in observations if item.mac_address), None)
+    if device is None and mac:
+        device = await database.scalar(select(Device).where(Device.mac_address == mac))
+    if device is None and address:
+        matched_address = await database.scalar(
+            select(DeviceAddress).where(DeviceAddress.address == address)
+        )
+        if matched_address:
+            device = await database.get(Device, matched_address.device_id)
+    if device is None:
+        device = Device(
+            display_name=recent.name[:100],
+            mac_address=mac,
+            device_type="network-device",
+            trust=DeviceTrust.unknown,
+            criticality="normal",
+            monitor_port=None,
+            status="unmonitored",
+            notes="Promoted from connected network inventory.",
+            addresses=[DeviceAddress(address=address, kind="host")] if address else [],
+        )
+        database.add(device)
+        await database.flush()
+    else:
+        if not device.mac_address and mac:
+            duplicate_mac = await database.scalar(
+                select(Device.id).where(Device.mac_address == mac, Device.id != device.id)
+            )
+            if duplicate_mac:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT, "MAC address belongs to another canonical device"
+                )
+            device.mac_address = mac
+        if address and not await database.scalar(
+            select(DeviceAddress.id).where(DeviceAddress.device_id == device.id)
+        ):
+            duplicate_address = await database.scalar(
+                select(DeviceAddress.id).where(DeviceAddress.address == address)
+            )
+            if not duplicate_address:
+                database.add(DeviceAddress(device_id=device.id, address=address, kind="host"))
+    for observation in observations:
+        observation.imported_device_id = device.id
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="network.identity.link",
+            target_type="device",
+            target_id=f"{device.id}:{len(observations)}",
+        )
+    )
+    await database.commit()
 
 
 @router.post("", response_model=SourceView, status_code=201)
