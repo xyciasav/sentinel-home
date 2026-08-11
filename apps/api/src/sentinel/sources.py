@@ -36,8 +36,9 @@ logger = logging.getLogger(__name__)
 
 class SourceInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    kind: str = Field(default="home_assistant", pattern=r"^(home_assistant|pihole)$")
     base_url: AnyHttpUrl
-    token: str = Field(min_length=20, max_length=1000)
+    token: str = Field(min_length=1, max_length=1000)
 
 
 class SourceView(BaseModel):
@@ -52,6 +53,7 @@ class SourceView(BaseModel):
     device_count: int
     importable_count: int
     imported_count: int
+    summary: dict | None
 
 
 class SourceDeviceView(BaseModel):
@@ -78,7 +80,11 @@ def safe_base_url(value: str) -> str:
         address = ipaddress.ip_address(parsed.hostname)
         allowed = address.is_private or address.is_loopback or address.is_link_local
     except ValueError:
-        allowed = parsed.hostname.endswith(".local") or "." not in parsed.hostname
+        allowed = (
+            parsed.hostname == "pi.hole"
+            or parsed.hostname.endswith(".local")
+            or "." not in parsed.hostname
+        )
     if not allowed:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -168,6 +174,72 @@ async def fetch_home_assistant(source: InventorySource) -> list[dict]:
     return result
 
 
+async def fetch_pihole(source: InventorySource) -> tuple[list[dict], dict]:
+    password = decrypt_secret(source.credential_encrypted)
+    async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
+        authentication = await client.post(
+            f"{source.base_url}/api/auth", json={"password": password}
+        )
+        authentication.raise_for_status()
+        session = authentication.json().get("session") or {}
+        sid = session.get("sid")
+        if not session.get("valid") or not sid:
+            raise RuntimeError("Pi-hole rejected the application password")
+        headers = {"X-FTL-SID": sid, "Accept": "application/json"}
+        devices_response, summary_response, blocking_response = await asyncio.gather(
+            client.get(
+                f"{source.base_url}/api/network/devices",
+                headers=headers,
+                params={"max_devices": 1000, "max_addresses": 10},
+            ),
+            client.get(f"{source.base_url}/api/stats/summary", headers=headers),
+            client.get(f"{source.base_url}/api/dns/blocking", headers=headers),
+        )
+        for response in (devices_response, summary_response, blocking_response):
+            response.raise_for_status()
+        await client.delete(f"{source.base_url}/api/auth", headers=headers)
+    raw_summary = summary_response.json()
+    summary = {
+        "blocking": bool(blocking_response.json().get("blocking")),
+        "queries": raw_summary.get("queries") or {},
+        "clients": raw_summary.get("clients") or {},
+        "gravity": raw_summary.get("gravity") or {},
+    }
+    return parse_pihole_devices(devices_response.json().get("devices", [])), summary
+
+
+def parse_pihole_devices(devices: list[dict]) -> list[dict]:
+    result = []
+    for device in devices:
+        addresses = sorted(
+            device.get("ips") or [], key=lambda value: value.get("lastSeen") or 0, reverse=True
+        )
+        selected = next(
+            (value for value in addresses if _private_address(str(value.get("ip") or ""))),
+            None,
+        )
+        address = str(selected.get("ip")) if selected else None
+        hostname = str(selected.get("name")) if selected and selected.get("name") else None
+        mac = str(device.get("hwaddr") or "") or None
+        external_id = str(device.get("id") or mac or address or "")
+        if not external_id:
+            continue
+        result.append(
+            {
+                "external_id": external_id[:255],
+                "name": (hostname or mac or address or "Unnamed Pi-hole client")[:255],
+                "address": address[:45] if address else None,
+                "mac_address": mac[:30] if mac else None,
+                "manufacturer": str(device.get("macVendor"))[:100]
+                if device.get("macVendor")
+                else None,
+                "model": str(device.get("interface"))[:100] if device.get("interface") else None,
+                "area_name": "Pi-hole DNS client",
+            }
+        )
+    return result
+
+
 def _private_address(value: str) -> bool:
     try:
         address = ipaddress.ip_address(value)
@@ -194,12 +266,17 @@ async def source_view(database: AsyncSession, source: InventorySource) -> Source
             bool(item.address and not item.imported_device_id) for item in devices
         ),
         imported_count=sum(bool(item.imported_device_id) for item in devices),
+        summary=json.loads(source.summary_json) if source.summary_json else None,
     )
 
 
 async def synchronize_source(database: AsyncSession, source: InventorySource) -> None:
     try:
-        incoming = await fetch_home_assistant(source)
+        if source.kind == "pihole":
+            incoming, summary = await fetch_pihole(source)
+            source.summary_json = json.dumps(summary)
+        else:
+            incoming = await fetch_home_assistant(source)
         existing = {
             item.external_id: item
             for item in await database.scalars(
@@ -288,6 +365,7 @@ async def create_source(
 ) -> SourceView:
     source = InventorySource(
         name=payload.name.strip(),
+        kind=payload.kind,
         base_url=safe_base_url(str(payload.base_url)),
         credential_encrypted=encrypt_secret(payload.token.strip()),
     )
@@ -340,6 +418,9 @@ async def import_source_devices(
     database: Annotated[AsyncSession, Depends(get_session)],
     auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
 ) -> None:
+    source = await database.get(InventorySource, source_id)
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "inventory source not found")
     candidates = list(
         await database.scalars(
             select(SourceDevice).where(
@@ -362,11 +443,11 @@ async def import_source_devices(
         )
         device = Device(
             display_name=item.name[:100],
-            device_type="home-assistant",
+            device_type="pihole-client" if source.kind == "pihole" else "home-assistant",
             trust=DeviceTrust.unknown,
             criticality="normal",
             monitor_port=None,
-            notes=f"Imported from Home Assistant{': ' + notes if notes else ''}",
+            notes=f"Imported from {source.name}{': ' + notes if notes else ''}",
             addresses=[DeviceAddress(address=item.address, kind="host")],
         )
         database.add(device)

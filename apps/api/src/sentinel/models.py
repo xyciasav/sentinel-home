@@ -117,6 +117,7 @@ class InventorySource(Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sync_status: Mapped[str] = mapped_column(String(30), default="never")
     last_sync_error: Mapped[str | None] = mapped_column(String(500))
+    summary_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
