@@ -22,3 +22,7 @@ EOF
 systemctl daemon-reload
 systemctl restart sentinel-agent
 systemctl status sentinel-agent --no-pager
+printf 'Installed agent: '
+/usr/local/bin/sentinel-agent --version
+printf 'Installed executor: '
+/usr/local/libexec/sentinel-remediate --version

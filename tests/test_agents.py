@@ -15,6 +15,7 @@ def test_linux_agent_postpones_newer_type_annotation_evaluation() -> None:
     assert "from __future__ import annotations" in source
     assert 'VERSION = "0.5.2"' in source
     assert "verify_command" in source
+    assert 'parser.add_argument("--version", action="version", version=VERSION)' in source
     ast.parse(source, feature_version=(3, 8))
 
 

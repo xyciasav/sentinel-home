@@ -206,6 +206,7 @@ def telemetry(include_packages: bool, include_containers: bool = False) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument(
         "--state",
         default=os.getenv(

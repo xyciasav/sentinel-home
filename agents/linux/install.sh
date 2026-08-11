@@ -52,4 +52,8 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now sentinel-agent
+printf 'Installed agent: '
+/usr/local/bin/sentinel-agent --version
+printf 'Installed executor: '
+/usr/local/libexec/sentinel-remediate --version
 echo "Sentinel agent installed and started."
