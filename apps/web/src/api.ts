@@ -10,7 +10,7 @@ export type Device = {
 export type DuplicateCandidate = {left:Device;right:Device;confidence:number;reasons:string[]};
 export type ServiceMonitor = {
   id:string; name:string; group_name:string|null; target_scope:"internal"|"external"; url:string; device_id:string|null; expected_status:number;
-  expected_text:string|null; timeout_seconds:number; verify_tls:boolean; enabled:boolean;
+  expected_text:string|null; timeout_seconds:number; failure_threshold:number; retry_interval_seconds:number; consecutive_failures:number; next_retry_at:string|null; verify_tls:boolean; enabled:boolean;
   severity:string; status:string; last_checked_at:string|null; last_success_at:string|null;
   notifications_muted:boolean;
   outage_started_at:string|null; last_response_ms:number|null; last_status_code:number|null;

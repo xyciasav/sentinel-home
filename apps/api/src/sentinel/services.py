@@ -25,6 +25,8 @@ class MonitorInput(BaseModel):
     expected_status: int = Field(default=200, ge=100, le=599)
     expected_text: str | None = Field(default=None, max_length=500)
     timeout_seconds: int = Field(default=5, ge=1, le=30)
+    failure_threshold: int = Field(default=3, ge=1, le=20)
+    retry_interval_seconds: int = Field(default=60, ge=10, le=3600)
     verify_tls: bool = True
     enabled: bool = True
     severity: str = Field(default="normal", pattern=r"^(low|normal|high|critical)$")
@@ -40,6 +42,10 @@ class MonitorView(BaseModel):
     expected_status: int
     expected_text: str | None
     timeout_seconds: int
+    failure_threshold: int
+    retry_interval_seconds: int
+    consecutive_failures: int
+    next_retry_at: datetime | None
     verify_tls: bool
     enabled: bool
     notifications_muted: bool

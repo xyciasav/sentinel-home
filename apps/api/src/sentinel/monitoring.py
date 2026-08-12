@@ -109,9 +109,18 @@ async def check_service(monitor: ServiceMonitor) -> MonitorResult:
         monitor.status = "up"
         monitor.last_success_at = checked_at
         monitor.outage_started_at = None
+        monitor.consecutive_failures = 0
+        monitor.next_retry_at = None
     else:
-        monitor.status = "down"
-        monitor.outage_started_at = monitor.outage_started_at or checked_at
+        monitor.consecutive_failures = (monitor.consecutive_failures or 0) + 1
+        monitor.next_retry_at = checked_at + timedelta(
+            seconds=monitor.retry_interval_seconds or 60
+        )
+        if monitor.consecutive_failures >= (monitor.failure_threshold or 3):
+            monitor.status = "down"
+            monitor.outage_started_at = monitor.outage_started_at or checked_at
+        else:
+            monitor.status = "retrying"
     return MonitorResult(
         monitor_id=monitor.id,
         checked_at=checked_at,
@@ -143,6 +152,8 @@ async def monitor_all_services() -> None:
             await database.scalars(select(ServiceMonitor).where(ServiceMonitor.enabled.is_(True)))
         )
         for monitor in monitors:
+            if monitor.next_retry_at and monitor.next_retry_at > datetime.now(UTC):
+                continue
             previous_status = monitor.status
             result = await check_service(monitor)
             database.add(result)

@@ -22,11 +22,30 @@ async def test_service_rejects_public_targets() -> None:
     )
     result = await check_service(monitor)
     assert result.success is False
-    assert monitor.status == "down"
-    assert monitor.outage_started_at is not None
+    assert monitor.status == "retrying"
+    assert monitor.outage_started_at is None
+    assert monitor.consecutive_failures == 1
     assert monitor.last_failure_reason == (
         "target did not resolve exclusively to private/local network addresses"
     )
+
+
+async def test_service_only_goes_down_after_failure_threshold() -> None:
+    monitor = ServiceMonitor(
+        id=uuid.uuid4(),
+        name="Private target",
+        url="https://8.8.8.8/",
+        expected_status=200,
+        timeout_seconds=1,
+        failure_threshold=2,
+        retry_interval_seconds=30,
+        verify_tls=True,
+    )
+    await check_service(monitor)
+    assert monitor.status == "retrying"
+    await check_service(monitor)
+    assert monitor.status == "down"
+    assert monitor.outage_started_at is not None
 
 
 async def test_external_scope_accepts_only_public_targets() -> None:
