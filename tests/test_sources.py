@@ -98,6 +98,26 @@ def test_pihole_analysis_detects_query_spike_after_baseline() -> None:
 
 def test_pihole_diagnostics_explains_privacy_filtered_rankings() -> None:
     diagnostics = traffic_diagnostics(
-        500, {"top_domains": [], "top_blocked_domains": [], "top_clients": []}
+        500,
+        {
+            "top_domains": [],
+            "top_blocked_domains": [],
+            "top_clients": [],
+            "api_mode": "v6",
+            "endpoint_status": {"domains": 200, "clients": 200},
+        },
     )
-    assert "privacy level to 0" in diagnostics[0]
+    assert "succeeded" in diagnostics[0]
+
+
+def test_pihole_diagnostics_identifies_legacy_api_fallback() -> None:
+    diagnostics = traffic_diagnostics(
+        500,
+        {
+            "top_domains": [],
+            "top_blocked_domains": [],
+            "top_clients": [],
+            "api_mode": "legacy",
+        },
+    )
+    assert "application password" in diagnostics[0]

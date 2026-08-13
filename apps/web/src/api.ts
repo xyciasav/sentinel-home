@@ -509,9 +509,16 @@ export type PiHoleTraffic = {
   top_clients: { client: string; count: number }[];
   top_domains: { domain: string; count: number }[];
   top_blocked_domains: { domain: string; count: number }[];
-  anomalies: { kind: string; severity: string; message: string; value: number; baseline: number }[];
+  anomalies: {
+    kind: string;
+    severity: string;
+    message: string;
+    value: number;
+    baseline: number;
+  }[];
   baseline_samples: number;
   diagnostics: string[];
+  api_mode: string;
 };
 export type AgentEnrollment = { enrollment_token: string; expires_at: string };
 export type AgentMetric = {

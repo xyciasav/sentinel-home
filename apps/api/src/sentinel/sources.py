@@ -116,6 +116,7 @@ class PiHoleTrafficView(BaseModel):
     anomalies: list[dict]
     baseline_samples: int
     diagnostics: list[str]
+    api_mode: str
 
 
 def safe_base_url(value: str) -> str:
@@ -285,16 +286,23 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
             response.raise_for_status()
         await client.delete(f"{base_url}/api/auth", headers=headers)
     raw_summary = summary_response.json()
+    traffic = parse_pihole_traffic(
+        domains_response.json() if domains_response.is_success else {},
+        clients_response.json() if clients_response.is_success else {},
+        blocked_domains_response.json() if blocked_domains_response.is_success else {},
+    )
+    traffic["api_mode"] = "v6"
+    traffic["endpoint_status"] = {
+        "domains": domains_response.status_code,
+        "blocked_domains": blocked_domains_response.status_code,
+        "clients": clients_response.status_code,
+    }
     summary = {
         "blocking": bool(blocking_response.json().get("blocking")),
         "queries": raw_summary.get("queries") or {},
         "clients": raw_summary.get("clients") or {},
         "gravity": raw_summary.get("gravity") or {},
-        "traffic": parse_pihole_traffic(
-            domains_response.json() if domains_response.is_success else {},
-            clients_response.json() if clients_response.is_success else {},
-            blocked_domains_response.json() if blocked_domains_response.is_success else {},
-        ),
+        "traffic": traffic,
     }
     return parse_pihole_devices(devices_response.json().get("devices", [])), summary
 
@@ -345,6 +353,15 @@ async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
                     "area_name": "Pi-hole v5 API",
                 }
             )
+    traffic = parse_pihole_traffic(
+        {
+            "top_domains": raw_domains.get("top_queries", {}),
+            "top_ads": raw_domains.get("top_ads", {}),
+        },
+        {"top_sources": top_sources},
+    )
+    traffic["api_mode"] = "legacy"
+    traffic["endpoint_status"] = {"legacy_stats": domains_response.status_code}
     summary = {
         "blocking": raw_summary.get("status") == "enabled",
         "queries": {
@@ -357,13 +374,7 @@ async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
             "total": raw_summary.get("clients_ever_seen", 0),
         },
         "gravity": {"domains_being_blocked": raw_summary.get("domains_being_blocked", 0)},
-        "traffic": parse_pihole_traffic(
-            {
-                "top_domains": raw_domains.get("top_queries", {}),
-                "top_ads": raw_domains.get("top_ads", {}),
-            },
-            {"top_sources": top_sources},
-        ),
+        "traffic": traffic,
     }
     return devices, summary
 
@@ -415,10 +426,20 @@ def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | N
 def traffic_diagnostics(total_queries: int, traffic: dict) -> list[str]:
     has_domains = bool(traffic.get("top_domains") or traffic.get("top_blocked_domains"))
     has_clients = bool(traffic.get("top_clients"))
+    statuses = traffic.get("endpoint_status") or {}
+    failures = [f"{name}: HTTP {code}" for name, code in statuses.items() if code >= 400]
+    if failures:
+        return ["Pi-hole traffic endpoint failed (" + ", ".join(failures) + ")."]
     if total_queries and not has_domains and not has_clients:
+        if traffic.get("api_mode") == "legacy":
+            return [
+                "Sentinel connected through the legacy API, which returned totals but no rankings. "
+                "If this is Pi-hole v6, reconnect it using a Pi-hole application password."
+            ]
         return [
-            "Pi-hole reports DNS queries but is hiding domain and client rankings. "
-            "Set Pi-hole privacy level to 0, generate new traffic, and analyze again."
+            "Pi-hole's ranking endpoints succeeded but returned no clients or domains. "
+            "Privacy level 0 does not restore previously hidden queries; generate new DNS traffic, "
+            "then analyze again. Also check Pi-hole's excludeClients and excludeDomains settings."
         ]
     if total_queries and not has_domains:
         return [
@@ -818,6 +839,7 @@ async def pihole_traffic(
                 diagnostics=traffic_diagnostics(
                     int((summary.get("queries") or {}).get("total") or 0), traffic
                 ),
+                api_mode=str(traffic.get("api_mode") or "unknown"),
             )
         )
     return result
