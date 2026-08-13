@@ -500,6 +500,18 @@ export type NetworkIdentityEvent = {
   acknowledged_at: string | null;
   severity: "low" | "medium";
 };
+export type PiHoleTraffic = {
+  source_id: string;
+  source_name: string;
+  collected_at: string | null;
+  status: string;
+  queries: { total?: number; blocked?: number; percent_blocked?: number };
+  top_clients: { client: string; count: number }[];
+  top_domains: { domain: string; count: number }[];
+  top_blocked_domains: { domain: string; count: number }[];
+  anomalies: { kind: string; severity: string; message: string; value: number; baseline: number }[];
+  baseline_samples: number;
+};
 export type AgentEnrollment = { enrollment_token: string; expires_at: string };
 export type AgentMetric = {
   cpu_percent: number;
@@ -887,6 +899,8 @@ export const api = {
     request<NetworkAsset[]>("/api/v1/sources/network-inventory"),
   networkActivity: () =>
     request<NetworkIdentityEvent[]>("/api/v1/sources/network-activity"),
+  piholeTraffic: () =>
+    request<PiHoleTraffic[]>("/api/v1/sources/pihole-traffic"),
   acknowledgeNetworkActivity: (id: string, csrfToken: string) =>
     request<NetworkIdentityEvent>(
       `/api/v1/sources/network-activity/${id}/acknowledge`,

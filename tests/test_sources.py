@@ -1,6 +1,13 @@
 import pytest
 from fastapi import HTTPException
-from sentinel.sources import parse_pihole_devices, pihole_api_base, safe_base_url, websocket_url
+from sentinel.sources import (
+    analyze_pihole_traffic,
+    parse_pihole_devices,
+    parse_pihole_traffic,
+    pihole_api_base,
+    safe_base_url,
+    websocket_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -52,3 +59,37 @@ def test_parse_pihole_devices_prefers_recent_private_address() -> None:
     assert devices[0]["name"] == "media-server"
     assert devices[0]["address"] == "192.168.1.20"
     assert devices[0]["manufacturer"] == "Example Vendor"
+
+
+def test_parse_pihole_traffic_normalizes_rankings() -> None:
+    traffic = parse_pihole_traffic(
+        {
+            "domains": {
+                "top_domains": [{"domain": "example.com", "count": 12}],
+            }
+        },
+        {"clients": {"top_sources": {"10.0.0.5": 19}}},
+        {"domains": [{"domain": "ads.example", "count": 7}]},
+    )
+    assert traffic["top_domains"] == [{"domain": "example.com", "count": 12}]
+    assert traffic["top_blocked_domains"] == [{"domain": "ads.example", "count": 7}]
+    assert traffic["top_clients"] == [{"client": "10.0.0.5", "count": 19}]
+
+
+def test_pihole_analysis_detects_query_spike_after_baseline() -> None:
+    previous = {
+        "traffic_baseline": {
+            "samples": 4,
+            "queries_per_interval": 100,
+            "blocked_percent": 10,
+            "last_total": 500,
+        },
+        "traffic": {"top_domains": []},
+    }
+    current = {
+        "queries": {"total": 900, "blocked": 90},
+        "traffic": {"top_domains": []},
+    }
+    analyzed = analyze_pihole_traffic(current, previous)
+    assert analyzed["traffic"]["anomalies"][0]["kind"] == "query_spike"
+    assert analyzed["traffic_baseline"]["samples"] == 5

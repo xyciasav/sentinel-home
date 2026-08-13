@@ -104,6 +104,19 @@ class NetworkIdentityEventView(BaseModel):
     severity: str
 
 
+class PiHoleTrafficView(BaseModel):
+    source_id: uuid.UUID
+    source_name: str
+    collected_at: datetime | None
+    status: str
+    queries: dict
+    top_clients: list[dict]
+    top_domains: list[dict]
+    top_blocked_domains: list[dict]
+    anomalies: list[dict]
+    baseline_samples: int
+
+
 def safe_base_url(value: str) -> str:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username:
@@ -240,7 +253,14 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
         if not session.get("valid") or not sid:
             raise RuntimeError("Pi-hole rejected the application password")
         headers = {"X-FTL-SID": sid, "Accept": "application/json"}
-        devices_response, summary_response, blocking_response = await asyncio.gather(
+        (
+            devices_response,
+            summary_response,
+            blocking_response,
+            domains_response,
+            blocked_domains_response,
+            clients_response,
+        ) = await asyncio.gather(
             client.get(
                 f"{base_url}/api/network/devices",
                 headers=headers,
@@ -248,6 +268,17 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
             ),
             client.get(f"{base_url}/api/stats/summary", headers=headers),
             client.get(f"{base_url}/api/dns/blocking", headers=headers),
+            client.get(
+                f"{base_url}/api/stats/top_domains",
+                headers=headers,
+                params={"count": 25, "blocked": "false"},
+            ),
+            client.get(
+                f"{base_url}/api/stats/top_domains",
+                headers=headers,
+                params={"count": 25, "blocked": "true"},
+            ),
+            client.get(f"{base_url}/api/stats/top_clients", headers=headers, params={"count": 25}),
         )
         for response in (devices_response, summary_response, blocking_response):
             response.raise_for_status()
@@ -258,13 +289,18 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
         "queries": raw_summary.get("queries") or {},
         "clients": raw_summary.get("clients") or {},
         "gravity": raw_summary.get("gravity") or {},
+        "traffic": parse_pihole_traffic(
+            domains_response.json() if domains_response.is_success else {},
+            clients_response.json() if clients_response.is_success else {},
+            blocked_domains_response.json() if blocked_domains_response.is_success else {},
+        ),
     }
     return parse_pihole_devices(devices_response.json().get("devices", [])), summary
 
 
 async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
     async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
-        summary_response, clients_response = await asyncio.gather(
+        summary_response, clients_response, domains_response = await asyncio.gather(
             client.get(
                 f"{base_url}/admin/api.php",
                 params={"summaryRaw": "", "auth": token},
@@ -273,12 +309,17 @@ async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
                 f"{base_url}/admin/api.php",
                 params={"getQuerySources": "", "auth": token},
             ),
+            client.get(
+                f"{base_url}/admin/api.php",
+                params={"topItems": 25, "auth": token},
+            ),
         )
-        for response in (summary_response, clients_response):
+        for response in (summary_response, clients_response, domains_response):
             response.raise_for_status()
     try:
         raw_summary = summary_response.json()
         raw_clients = clients_response.json()
+        raw_domains = domains_response.json()
     except ValueError as error:
         raise RuntimeError("legacy Pi-hole API token returned a non-JSON response") from error
     if not isinstance(raw_summary, dict) or "status" not in raw_summary:
@@ -315,8 +356,136 @@ async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
             "total": raw_summary.get("clients_ever_seen", 0),
         },
         "gravity": {"domains_being_blocked": raw_summary.get("domains_being_blocked", 0)},
+        "traffic": parse_pihole_traffic(
+            {
+                "top_domains": raw_domains.get("top_queries", {}),
+                "top_ads": raw_domains.get("top_ads", {}),
+            },
+            {"top_sources": top_sources},
+        ),
     }
     return devices, summary
+
+
+def _ranked_items(values: object, *, label: str) -> list[dict]:
+    if isinstance(values, dict):
+        values = [{label: key, "count": count} for key, count in values.items()]
+    if not isinstance(values, list):
+        return []
+    result = []
+    for value in values[:25]:
+        if not isinstance(value, dict):
+            continue
+        name = value.get(label) or value.get("name") or value.get("domain") or value.get("ip")
+        count = value.get("count", value.get("queries", 0))
+        if name:
+            result.append({label: str(name)[:255], "count": int(count or 0)})
+    return result
+
+
+def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | None = None) -> dict:
+    domain_data = domains.get("domains") or domains
+    client_data = clients.get("clients") or clients
+    blocked_data = (blocked_domains or {}).get("domains") or blocked_domains or {}
+    permitted = (
+        domain_data.get("top_domains", domain_data.get("permitted", []))
+        if isinstance(domain_data, dict)
+        else domain_data
+    )
+    blocked = (
+        blocked_data.get("top_domains", blocked_data.get("blocked", []))
+        if isinstance(blocked_data, dict)
+        else blocked_data
+    )
+    if not blocked and isinstance(domain_data, dict):
+        blocked = domain_data.get("top_ads", domain_data.get("blocked", []))
+    client_values = (
+        client_data.get("top_sources", client_data.get("total", client_data))
+        if isinstance(client_data, dict)
+        else []
+    )
+    return {
+        "top_domains": _ranked_items(permitted, label="domain"),
+        "top_blocked_domains": _ranked_items(blocked, label="domain"),
+        "top_clients": _ranked_items(client_values, label="client"),
+    }
+
+
+def analyze_pihole_traffic(current: dict, previous: dict | None) -> dict:
+    traffic = current.setdefault("traffic", {})
+    queries = current.get("queries") or {}
+    total = int(queries.get("total") or 0)
+    blocked = int(queries.get("blocked") or 0)
+    ratio = round((blocked / total * 100) if total else 0, 2)
+    old_baseline = (previous or {}).get("traffic_baseline") or {}
+    samples = int(old_baseline.get("samples") or 0)
+    previous_total = int(old_baseline.get("last_total") or 0)
+    query_delta = total - previous_total if total >= previous_total else total
+    baseline_queries = float(old_baseline.get("queries_per_interval") or query_delta)
+    baseline_ratio = float(old_baseline.get("blocked_percent") or ratio)
+    anomalies = []
+    if (
+        samples >= 3
+        and baseline_queries > 0
+        and query_delta > baseline_queries * 2.5
+        and query_delta - baseline_queries > 100
+    ):
+        anomalies.append(
+            {
+                "kind": "query_spike",
+                "severity": "high",
+                "message": (
+                    f"Query volume is {query_delta / baseline_queries:.1f}× "
+                    "the recent interval baseline."
+                ),
+                "value": query_delta,
+                "baseline": round(baseline_queries),
+            }
+        )
+    if samples >= 3 and ratio > baseline_ratio + 20 and blocked > 50:
+        anomalies.append(
+            {
+                "kind": "blocked_spike",
+                "severity": "medium",
+                "message": (
+                    f"Blocked traffic is {ratio:.1f}% versus a {baseline_ratio:.1f}% baseline."
+                ),
+                "value": ratio,
+                "baseline": round(baseline_ratio, 1),
+            }
+        )
+    previous_domains = {
+        item.get("domain")
+        for item in ((previous or {}).get("traffic") or {}).get("top_domains", [])
+    }
+    new_domains = [
+        item
+        for item in traffic.get("top_domains", [])
+        if item.get("domain") not in previous_domains and int(item.get("count") or 0) >= 100
+    ]
+    if samples >= 1 and new_domains:
+        anomalies.append(
+            {
+                "kind": "new_busy_domain",
+                "severity": "low",
+                "message": (
+                    f"New high-volume domain: {new_domains[0]['domain']} "
+                    f"({new_domains[0]['count']} queries)."
+                ),
+                "value": new_domains[0]["count"],
+                "baseline": 0,
+            }
+        )
+    weight = min(samples, 7) / (min(samples, 7) + 1) if samples else 0
+    current["traffic_baseline"] = {
+        "samples": min(samples + 1, 10000),
+        "queries_per_interval": round(baseline_queries * weight + query_delta * (1 - weight), 2),
+        "blocked_percent": round(baseline_ratio * weight + ratio * (1 - weight), 2),
+        "last_total": total,
+    }
+    traffic["anomalies"] = anomalies
+    traffic["collected_at"] = datetime.now(UTC).isoformat()
+    return current
 
 
 def parse_pihole_devices(devices: list[dict]) -> list[dict]:
@@ -384,6 +553,8 @@ async def synchronize_source(database: AsyncSession, source: InventorySource) ->
         if source.kind == "pihole":
             source.base_url = pihole_api_base(source.base_url)
             incoming, summary = await fetch_pihole(source)
+            previous = json.loads(source.summary_json) if source.summary_json else None
+            summary = analyze_pihole_traffic(summary, previous)
             source.summary_json = json.dumps(summary)
         else:
             incoming = await fetch_home_assistant(source)
@@ -593,6 +764,42 @@ async def network_activity(
         )
         for event, source_name in rows
     ]
+
+
+@router.get("/pihole-traffic", response_model=list[PiHoleTrafficView])
+async def pihole_traffic(
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _auth: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> list[PiHoleTrafficView]:
+    sources = list(
+        await database.scalars(
+            select(InventorySource)
+            .where(InventorySource.kind == "pihole")
+            .order_by(InventorySource.name)
+        )
+    )
+    result = []
+    for source in sources:
+        summary = json.loads(source.summary_json) if source.summary_json else {}
+        traffic = summary.get("traffic") or {}
+        collected = traffic.get("collected_at")
+        result.append(
+            PiHoleTrafficView(
+                source_id=source.id,
+                source_name=source.name,
+                collected_at=datetime.fromisoformat(collected)
+                if collected
+                else source.last_sync_at,
+                status=source.last_sync_status,
+                queries=summary.get("queries") or {},
+                top_clients=traffic.get("top_clients") or [],
+                top_domains=traffic.get("top_domains") or [],
+                top_blocked_domains=traffic.get("top_blocked_domains") or [],
+                anomalies=traffic.get("anomalies") or [],
+                baseline_samples=int((summary.get("traffic_baseline") or {}).get("samples") or 0),
+            )
+        )
+    return result
 
 
 @router.post("/network-activity/{event_id}/acknowledge", response_model=NetworkIdentityEventView)
