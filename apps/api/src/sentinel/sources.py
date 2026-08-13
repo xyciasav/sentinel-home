@@ -117,6 +117,7 @@ class PiHoleTrafficView(BaseModel):
     baseline_samples: int
     diagnostics: list[str]
     api_mode: str
+    data_source: str
 
 
 def safe_base_url(value: str) -> str:
@@ -262,6 +263,7 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
             domains_response,
             blocked_domains_response,
             clients_response,
+            queries_response,
         ) = await asyncio.gather(
             client.get(
                 f"{base_url}/api/network/devices",
@@ -281,6 +283,7 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
                 params={"count": 25, "blocked": "true"},
             ),
             client.get(f"{base_url}/api/stats/top_clients", headers=headers, params={"count": 25}),
+            client.get(f"{base_url}/api/queries", headers=headers, params={"length": 1000}),
         )
         for response in (devices_response, summary_response, blocking_response):
             response.raise_for_status()
@@ -291,11 +294,20 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
         clients_response.json() if clients_response.is_success else {},
         blocked_domains_response.json() if blocked_domains_response.is_success else {},
     )
+    if (
+        not any(traffic.get(key) for key in ("top_domains", "top_blocked_domains", "top_clients"))
+        and queries_response.is_success
+    ):
+        traffic = aggregate_pihole_queries(queries_response.json().get("queries") or [])
+        traffic["data_source"] = "recent query log"
+    else:
+        traffic["data_source"] = "ranking endpoints"
     traffic["api_mode"] = "v6"
     traffic["endpoint_status"] = {
         "domains": domains_response.status_code,
         "blocked_domains": blocked_domains_response.status_code,
         "clients": clients_response.status_code,
+        "query_log": queries_response.status_code,
     }
     summary = {
         "blocking": bool(blocking_response.json().get("blocking")),
@@ -361,6 +373,7 @@ async def fetch_pihole_v5(base_url: str, token: str) -> tuple[list[dict], dict]:
         {"top_sources": top_sources},
     )
     traffic["api_mode"] = "legacy"
+    traffic["data_source"] = "legacy ranking endpoint"
     traffic["endpoint_status"] = {"legacy_stats": domains_response.status_code}
     summary = {
         "blocking": raw_summary.get("status") == "enabled",
@@ -393,6 +406,49 @@ def _ranked_items(values: object, *, label: str) -> list[dict]:
         if name:
             result.append({label: str(name)[:255], "count": int(count or 0)})
     return result
+
+
+def aggregate_pihole_queries(queries: list[dict]) -> dict:
+    clients: dict[str, int] = {}
+    permitted: dict[str, int] = {}
+    blocked: dict[str, int] = {}
+    blocked_statuses = {
+        "GRAVITY",
+        "REGEX",
+        "DENYLIST",
+        "EXTERNAL_BLOCKED_IP",
+        "EXTERNAL_BLOCKED_NULL",
+        "EXTERNAL_BLOCKED_NXRA",
+        "EXTERNAL_BLOCKED_EDE15",
+        "GRAVITY_CNAME",
+        "REGEX_CNAME",
+        "DENYLIST_CNAME",
+    }
+    for query in queries:
+        if not isinstance(query, dict):
+            continue
+        domain = str(query.get("domain") or "").strip()
+        client = query.get("client") or {}
+        identity = str(client.get("name") or client.get("ip") or "").strip()
+        if identity:
+            clients[identity] = clients.get(identity, 0) + 1
+        if domain:
+            target = (
+                blocked if str(query.get("status") or "").upper() in blocked_statuses else permitted
+            )
+            target[domain] = target.get(domain, 0) + 1
+
+    def ranked(values: dict[str, int], label: str) -> list[dict]:
+        return [
+            {label: name, "count": count}
+            for name, count in sorted(values.items(), key=lambda item: item[1], reverse=True)[:25]
+        ]
+
+    return {
+        "top_clients": ranked(clients, "client"),
+        "top_domains": ranked(permitted, "domain"),
+        "top_blocked_domains": ranked(blocked, "domain"),
+    }
 
 
 def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | None = None) -> dict:
@@ -437,9 +493,8 @@ def traffic_diagnostics(total_queries: int, traffic: dict) -> list[str]:
                 "If this is Pi-hole v6, reconnect it using a Pi-hole application password."
             ]
         return [
-            "Pi-hole's ranking endpoints succeeded but returned no clients or domains. "
-            "Privacy level 0 does not restore previously hidden queries; generate new DNS traffic, "
-            "then analyze again. Also check Pi-hole's excludeClients and excludeDomains settings."
+            "Pi-hole returned no rankings and no readable recent query-log entries. "
+            "Open Pi-hole's own Query Log to confirm new requests appear there."
         ]
     if total_queries and not has_domains:
         return [
@@ -840,6 +895,7 @@ async def pihole_traffic(
                     int((summary.get("queries") or {}).get("total") or 0), traffic
                 ),
                 api_mode=str(traffic.get("api_mode") or "unknown"),
+                data_source=str(traffic.get("data_source") or "unavailable"),
             )
         )
     return result

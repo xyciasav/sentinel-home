@@ -519,6 +519,7 @@ export type PiHoleTraffic = {
   baseline_samples: number;
   diagnostics: string[];
   api_mode: string;
+  data_source: string;
 };
 export type AgentEnrollment = { enrollment_token: string; expires_at: string };
 export type AgentMetric = {

@@ -1,6 +1,7 @@
 import pytest
 from fastapi import HTTPException
 from sentinel.sources import (
+    aggregate_pihole_queries,
     analyze_pihole_traffic,
     parse_pihole_devices,
     parse_pihole_traffic,
@@ -107,7 +108,7 @@ def test_pihole_diagnostics_explains_privacy_filtered_rankings() -> None:
             "endpoint_status": {"domains": 200, "clients": 200},
         },
     )
-    assert "succeeded" in diagnostics[0]
+    assert "no readable recent query-log entries" in diagnostics[0]
 
 
 def test_pihole_diagnostics_identifies_legacy_api_fallback() -> None:
@@ -121,3 +122,24 @@ def test_pihole_diagnostics_identifies_legacy_api_fallback() -> None:
         },
     )
     assert "application password" in diagnostics[0]
+
+
+def test_pihole_query_log_fallback_builds_rankings() -> None:
+    traffic = aggregate_pihole_queries(
+        [
+            {
+                "domain": "example.com",
+                "status": "FORWARDED",
+                "client": {"ip": "10.0.0.5", "name": "laptop"},
+            },
+            {
+                "domain": "ads.example",
+                "status": "GRAVITY",
+                "client": {"ip": "10.0.0.5", "name": "laptop"},
+            },
+            {"domain": "example.com", "status": "CACHE", "client": {"ip": "10.0.0.6"}},
+        ]
+    )
+    assert traffic["top_domains"][0] == {"domain": "example.com", "count": 2}
+    assert traffic["top_blocked_domains"][0]["domain"] == "ads.example"
+    assert traffic["top_clients"][0] == {"client": "laptop", "count": 2}
