@@ -6,6 +6,7 @@ from sentinel.sources import (
     parse_pihole_traffic,
     pihole_api_base,
     safe_base_url,
+    traffic_diagnostics,
     websocket_url,
 )
 
@@ -93,3 +94,10 @@ def test_pihole_analysis_detects_query_spike_after_baseline() -> None:
     analyzed = analyze_pihole_traffic(current, previous)
     assert analyzed["traffic"]["anomalies"][0]["kind"] == "query_spike"
     assert analyzed["traffic_baseline"]["samples"] == 5
+
+
+def test_pihole_diagnostics_explains_privacy_filtered_rankings() -> None:
+    diagnostics = traffic_diagnostics(
+        500, {"top_domains": [], "top_blocked_domains": [], "top_clients": []}
+    )
+    assert "privacy level to 0" in diagnostics[0]

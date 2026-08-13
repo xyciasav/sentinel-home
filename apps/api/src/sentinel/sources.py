@@ -115,6 +115,7 @@ class PiHoleTrafficView(BaseModel):
     top_blocked_domains: list[dict]
     anomalies: list[dict]
     baseline_samples: int
+    diagnostics: list[str]
 
 
 def safe_base_url(value: str) -> str:
@@ -409,6 +410,23 @@ def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | N
         "top_blocked_domains": _ranked_items(blocked, label="domain"),
         "top_clients": _ranked_items(client_values, label="client"),
     }
+
+
+def traffic_diagnostics(total_queries: int, traffic: dict) -> list[str]:
+    has_domains = bool(traffic.get("top_domains") or traffic.get("top_blocked_domains"))
+    has_clients = bool(traffic.get("top_clients"))
+    if total_queries and not has_domains and not has_clients:
+        return [
+            "Pi-hole reports DNS queries but is hiding domain and client rankings. "
+            "Set Pi-hole privacy level to 0, generate new traffic, and analyze again."
+        ]
+    if total_queries and not has_domains:
+        return [
+            "Pi-hole is hiding domain rankings. Privacy level 1 or higher disables top domains."
+        ]
+    if not total_queries:
+        return ["Pi-hole has not reported DNS queries in its current statistics period."]
+    return []
 
 
 def analyze_pihole_traffic(current: dict, previous: dict | None) -> dict:
@@ -797,6 +815,9 @@ async def pihole_traffic(
                 top_blocked_domains=traffic.get("top_blocked_domains") or [],
                 anomalies=traffic.get("anomalies") or [],
                 baseline_samples=int((summary.get("traffic_baseline") or {}).get("samples") or 0),
+                diagnostics=traffic_diagnostics(
+                    int((summary.get("queries") or {}).get("total") or 0), traffic
+                ),
             )
         )
     return result
