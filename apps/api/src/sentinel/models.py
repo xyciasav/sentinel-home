@@ -450,6 +450,11 @@ class Agent(Base):
     kernel_version: Mapped[str | None] = mapped_column(String(100))
     credential_fingerprint: Mapped[str] = mapped_column(String(128), unique=True)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_vulnerability_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_vulnerability_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    vulnerability_scan_status: Mapped[str] = mapped_column(String(20), default="pending")
+    vulnerability_scan_error: Mapped[str | None] = mapped_column(String(500))
+    vulnerability_finding_count: Mapped[int] = mapped_column(Integer, default=0)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

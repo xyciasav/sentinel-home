@@ -29,17 +29,19 @@ from sentinel.sources import router as sources_router
 from sentinel.sources import source_sync_loop
 from sentinel.storage import recover_storage_jobs
 from sentinel.storage import router as storage_router
+from sentinel.vulnerabilities import automatic_vulnerability_scan_loop
 from sentinel.vulnerabilities import router as vulnerabilities_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_settings()
-    monitor_task = source_task = application_task = None
+    monitor_task = source_task = application_task = vulnerability_task = None
     if get_settings().database_url:
         monitor_task = asyncio.create_task(monitoring_loop())
         source_task = asyncio.create_task(source_sync_loop())
         application_task = asyncio.create_task(application_sync_loop())
+        vulnerability_task = asyncio.create_task(automatic_vulnerability_scan_loop())
         await recover_storage_jobs()
     yield
     if monitor_task:
@@ -54,6 +56,10 @@ async def lifespan(_: FastAPI):
         application_task.cancel()
         with suppress(asyncio.CancelledError):
             await application_task
+    if vulnerability_task:
+        vulnerability_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await vulnerability_task
 
 
 app = FastAPI(title="Sentinel Home API", version=get_settings().sentinel_version, lifespan=lifespan)

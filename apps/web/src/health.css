@@ -19,3 +19,25 @@
   width: 16px;
   height: 16px;
 }
+
+.agent-scan-health {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 14px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #edf7f3;
+  color: #176348;
+  font-size: 11px;
+}
+
+.agent-scan-health.running,
+.agent-scan-health.waiting {
+  background: #fff5dc;
+  color: #765000;
+}
+
+.agent-scan-health.failed {
+  background: #fff0ef;
+  color: #a33a31;
+}

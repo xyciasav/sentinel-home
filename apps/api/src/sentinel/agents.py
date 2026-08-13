@@ -103,6 +103,11 @@ class AgentView(BaseModel):
     os_version: str | None
     kernel_version: str | None
     last_heartbeat_at: datetime | None
+    last_vulnerability_scan_at: datetime | None
+    next_vulnerability_scan_at: datetime | None
+    vulnerability_scan_status: str
+    vulnerability_scan_error: str | None
+    vulnerability_finding_count: int
     connected: bool
     cpu_percent: int | None
     memory_percent: int | None
@@ -293,10 +298,24 @@ async def heartbeat(
         device.status = "online"
         device.last_seen_at = now
     if payload.packages is not None:
+        previous_packages = {
+            (item.name, item.version, item.source_name, item.source_version)
+            for item in await database.scalars(
+                select(InstalledPackage).where(InstalledPackage.agent_id == agent.id)
+            )
+        }
         await database.execute(
             delete(InstalledPackage).where(InstalledPackage.agent_id == agent.id)
         )
         unique_packages = {item.name: item for item in payload.packages}
+        current_packages = {
+            (item.name, item.version, item.source_name, item.source_version)
+            for item in unique_packages.values()
+        }
+        if current_packages != previous_packages:
+            agent.next_vulnerability_scan_at = now
+            agent.vulnerability_scan_status = "queued"
+            agent.vulnerability_scan_error = None
         database.add_all(
             InstalledPackage(agent_id=agent.id, observed_at=now, **item.model_dump())
             for item in unique_packages.values()
@@ -525,6 +544,11 @@ async def list_agents(
                 os_version=agent.os_version,
                 kernel_version=agent.kernel_version,
                 last_heartbeat_at=agent.last_heartbeat_at,
+                last_vulnerability_scan_at=agent.last_vulnerability_scan_at,
+                next_vulnerability_scan_at=agent.next_vulnerability_scan_at,
+                vulnerability_scan_status=agent.vulnerability_scan_status,
+                vulnerability_scan_error=agent.vulnerability_scan_error,
+                vulnerability_finding_count=agent.vulnerability_finding_count,
                 connected=bool(
                     agent.last_heartbeat_at
                     and agent.last_heartbeat_at >= now - timedelta(seconds=45)

@@ -1,7 +1,8 @@
 import asyncio
 import json
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from urllib.parse import quote
 
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sentinel.auth import authenticated_session, csrf_protected_session
 from sentinel.config import get_settings
-from sentinel.database import get_session
+from sentinel.database import get_session, get_session_factory
 from sentinel.models import (
     Agent,
     DeviceAddress,
@@ -25,6 +26,7 @@ from sentinel.models import (
 )
 
 router = APIRouter(prefix="/api/v1/vulnerabilities", tags=["vulnerabilities"])
+logger = logging.getLogger(__name__)
 
 
 async def reconcile_package_findings(database: AsyncSession) -> int:
@@ -418,8 +420,87 @@ async def scan_agent_packages(
     for item in previous:
         if item.cve_id not in seen:
             item.status = "resolved"
+    completed = datetime.now(UTC)
+    agent.last_vulnerability_scan_at = completed
+    agent.next_vulnerability_scan_at = completed + timedelta(
+        seconds=get_settings().vulnerability_scan_interval_seconds
+    )
+    agent.vulnerability_scan_status = "healthy"
+    agent.vulnerability_scan_error = None
+    agent.vulnerability_finding_count = len(found)
     await database.commit()
     return found
+
+
+async def automatic_vulnerability_scan_loop() -> None:
+    """Continuously schedule bounded OSV scans from the latest agent package inventory."""
+    while True:
+        try:
+            now = datetime.now(UTC)
+            async with get_session_factory()() as database:
+                agents = list(
+                    await database.scalars(
+                        select(Agent)
+                        .where(
+                            Agent.revoked_at.is_(None),
+                            (Agent.next_vulnerability_scan_at.is_(None))
+                            | (Agent.next_vulnerability_scan_at <= now),
+                        )
+                        .order_by(Agent.created_at)
+                    )
+                )
+                for agent in agents:
+                    package = await database.scalar(
+                        select(InstalledPackage.id)
+                        .where(InstalledPackage.agent_id == agent.id)
+                        .limit(1)
+                    )
+                    if package is None or osv_ecosystem(agent.os_name, agent.os_version) is None:
+                        agent.vulnerability_scan_status = "waiting"
+                        agent.vulnerability_scan_error = (
+                            "Waiting for a supported package inventory."
+                        )
+                        agent.next_vulnerability_scan_at = now + timedelta(hours=1)
+                        await database.commit()
+                        continue
+                    agent.vulnerability_scan_status = "running"
+                    agent.vulnerability_scan_error = None
+                    await database.commit()
+                    try:
+                        findings = await scan_agent_packages(
+                            agent.id, database, None  # type: ignore[arg-type]
+                        )
+                        agent = await database.get(Agent, agent.id)
+                        if agent is not None:
+                            completed = datetime.now(UTC)
+                            agent.last_vulnerability_scan_at = completed
+                            agent.next_vulnerability_scan_at = completed + timedelta(
+                                seconds=get_settings().vulnerability_scan_interval_seconds
+                            )
+                            agent.vulnerability_scan_status = "healthy"
+                            agent.vulnerability_scan_error = None
+                            agent.vulnerability_finding_count = len(findings)
+                            await database.commit()
+                    except Exception as error:
+                        await database.rollback()
+                        failed_agent = await database.get(Agent, agent.id)
+                        if failed_agent is not None:
+                            failed_agent.last_vulnerability_scan_at = datetime.now(UTC)
+                            failed_agent.next_vulnerability_scan_at = datetime.now(UTC) + timedelta(
+                                hours=1
+                            )
+                            failed_agent.vulnerability_scan_status = "failed"
+                            failed_agent.vulnerability_scan_error = str(error)[:500]
+                            await database.commit()
+                        logger.warning(
+                            "automatic vulnerability scan failed for %s: %s",
+                            agent.id,
+                            error,
+                        )
+                    await asyncio.sleep(10)
+        except Exception:
+            logger.exception("automatic vulnerability scan cycle failed")
+        await asyncio.sleep(300)
 
 
 @router.put("/{finding_id}", response_model=FindingView)
