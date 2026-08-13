@@ -470,6 +470,7 @@ export type SourceDevice = {
   id: string;
   external_id: string;
   name: string;
+  custom_name: string | null;
   address: string | null;
   mac_address: string | null;
   manufacturer: string | null;
@@ -956,6 +957,17 @@ export const api = {
     }),
   sourceDevices: (id: string) =>
     request<SourceDevice[]>(`/api/v1/sources/${id}/devices`),
+  renameSourceDevice: (
+    sourceId: string,
+    deviceId: string,
+    name: string,
+    csrfToken: string,
+  ) =>
+    request<SourceDevice>(`/api/v1/sources/${sourceId}/devices/${deviceId}`, {
+      method: "PATCH",
+      headers: { "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ name }),
+    }),
   importSourceDevices: (id: string, ids: string[], csrfToken: string) =>
     request<void>(`/api/v1/sources/${id}/import`, {
       method: "POST",

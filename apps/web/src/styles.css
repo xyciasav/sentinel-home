@@ -1963,6 +1963,12 @@ header > div > p:last-child {
   display: grid;
   gap: 3px;
 }
+.source-device-name input {
+  width: 100%;
+  min-width: 160px;
+  padding: 7px 9px;
+  font-weight: 700;
+}
 .source-device small {
   color: var(--muted);
 }

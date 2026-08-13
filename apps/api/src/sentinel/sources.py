@@ -62,6 +62,7 @@ class SourceDeviceView(BaseModel):
     id: uuid.UUID
     external_id: str
     name: str
+    custom_name: str | None
     address: str | None
     mac_address: str | None
     manufacturer: str | None
@@ -72,6 +73,10 @@ class SourceDeviceView(BaseModel):
 
 class ImportInput(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class SourceDeviceNameInput(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
 
 
 class NetworkAssetView(BaseModel):
@@ -557,8 +562,7 @@ def traffic_signals(
                     f"{nxdomain_count / sample_count:.0%} of recent queries returned NXDOMAIN."
                 ),
                 "detail": (
-                    "This can indicate a broken client, typo loop, "
-                    "or domain-generation behavior."
+                    "This can indicate a broken client, typo loop, or domain-generation behavior."
                 ),
             }
         )
@@ -590,8 +594,7 @@ def traffic_signals(
                     f"{top_client_count / sample_count:.0%} of recent DNS traffic."
                 ),
                 "detail": (
-                    "A single dominant client may be expected, "
-                    "misconfigured, or unusually active."
+                    "A single dominant client may be expected, misconfigured, or unusually active."
                 ),
             }
         )
@@ -968,7 +971,7 @@ async def network_inventory(
         result.append(
             NetworkAssetView(
                 id=f"observation:{identity}",
-                name=recent.name,
+                name=recent.custom_name or recent.name,
                 address=next((item.address for item in grouped if item.address), None),
                 mac_address=next((item.mac_address for item in grouped if item.mac_address), None),
                 status="needs_review",
@@ -1123,7 +1126,7 @@ async def link_network_identity(
             device = await database.get(Device, matched_address.device_id)
     if device is None:
         device = Device(
-            display_name=recent.name[:100],
+            display_name=(recent.custom_name or recent.name)[:100],
             mac_address=mac,
             device_type="network-device",
             trust=DeviceTrust.unknown,
@@ -1224,6 +1227,41 @@ async def list_source_devices(
     )
 
 
+@router.patch("/{source_id}/devices/{device_id}", response_model=SourceDeviceView)
+async def rename_source_device(
+    source_id: uuid.UUID,
+    device_id: uuid.UUID,
+    payload: SourceDeviceNameInput,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> SourceDevice:
+    item = await database.scalar(
+        select(SourceDevice).where(
+            SourceDevice.id == device_id, SourceDevice.source_id == source_id
+        )
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "source device not found")
+    custom_name = " ".join(payload.name.split())
+    if not custom_name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "device name is required")
+    item.custom_name = custom_name
+    if item.imported_device_id:
+        imported = await database.get(Device, item.imported_device_id)
+        if imported is not None:
+            imported.display_name = custom_name
+    database.add(
+        AuditEvent(
+            actor_user_id=auth[0].id,
+            action="source.device.rename",
+            target_type="source_device",
+            target_id=str(item.id),
+        )
+    )
+    await database.commit()
+    return item
+
+
 @router.post("/{source_id}/import", status_code=204)
 async def import_source_devices(
     source_id: uuid.UUID,
@@ -1260,6 +1298,8 @@ async def import_source_devices(
                 existing_device = await database.get(Device, existing_address.device_id)
         if existing_device:
             item.imported_device_id = existing_device.id
+            if item.custom_name:
+                existing_device.display_name = item.custom_name[:100]
             if not existing_device.mac_address and item.mac_address:
                 existing_device.mac_address = item.mac_address.lower()
             continue
@@ -1267,7 +1307,7 @@ async def import_source_devices(
             value for value in (item.manufacturer, item.model, item.area_name) if value
         )
         device = Device(
-            display_name=item.name[:100],
+            display_name=(item.custom_name or item.name)[:100],
             mac_address=item.mac_address.lower() if item.mac_address else None,
             device_type="pihole-client" if source.kind == "pihole" else "home-assistant",
             trust=DeviceTrust.unknown,

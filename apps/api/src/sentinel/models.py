@@ -135,6 +135,7 @@ class SourceDevice(Base):
     )
     external_id: Mapped[str] = mapped_column(String(255))
     name: Mapped[str] = mapped_column(String(255))
+    custom_name: Mapped[str | None] = mapped_column(String(255))
     address: Mapped[str | None] = mapped_column(String(45))
     mac_address: Mapped[str | None] = mapped_column(String(30))
     manufacturer: Mapped[str | None] = mapped_column(String(100))

@@ -1,25 +1,441 @@
 import { FormEvent, useState } from "react";
 import { api, InventorySource, SourceDevice } from "./api";
 
-export function SourcesPage({sources,csrf,refresh,refreshDevices}:{sources:InventorySource[];csrf:string;refresh:()=>Promise<void>;refreshDevices:()=>Promise<void>}){
-  const [adding,setAdding]=useState<"home_assistant"|"pihole"|false>(false),[busy,setBusy]=useState(""),[error,setError]=useState("");
-  const [selectedSource,setSelectedSource]=useState<InventorySource|null>(null),[devices,setDevices]=useState<SourceDevice[]>([]),[selected,setSelected]=useState<Set<string>>(new Set());
-  async function create(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!adding)return;setBusy("create");setError("");const data=new FormData(event.currentTarget);try{const source=await api.createSource({kind:adding,name:data.get("name"),base_url:data.get("url"),token:data.get("token")},csrf);setAdding(false);await api.syncSource(source.id,csrf);await refresh()}catch(reason){setError(reason instanceof Error?reason.message:"Could not connect inventory source")}finally{setBusy("")}}
-  async function sync(source:InventorySource){setBusy(source.id);setError("");try{const updated=await api.syncSource(source.id,csrf);await refresh();if(selectedSource?.id===source.id){setSelectedSource(updated);setDevices(await api.sourceDevices(source.id))}}catch(reason){setError(reason instanceof Error?reason.message:"Sync failed")}finally{setBusy("")}}
-  async function inspect(source:InventorySource){setSelectedSource(source);setSelected(new Set());setDevices(await api.sourceDevices(source.id))}
-  async function remove(source:InventorySource){if(!confirm(`Disconnect ${source.name}? Imported devices will remain in Sentinel.`))return;setBusy(source.id);setError("");try{await api.deleteSource(source.id,csrf);await refresh()}catch(reason){setError(reason instanceof Error?reason.message:"Could not disconnect source")}finally{setBusy("")}}
-  function toggle(id:string){setSelected(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next})}
-  async function importSelected(){if(!selectedSource||!selected.size)return;setBusy("import");try{await api.importSourceDevices(selectedSource.id,[...selected],csrf);setDevices(await api.sourceDevices(selectedSource.id));setSelected(new Set());await refresh();await refreshDevices()}catch(reason){setError(reason instanceof Error?reason.message:"Import failed")}finally{setBusy("")}}
-  return <><header><div><p className="eyebrow">CONNECTED INVENTORY</p><h1>Sources</h1><p>Pull devices from systems that already understand your network.</p></div><div className="row-actions"><button onClick={()=>setAdding("home_assistant")}>+ Home Assistant</button><button className="primary compact" onClick={()=>setAdding("pihole")}>+ Pi-hole</button></div></header>
-    <div className="notice panel"><b>Automatic network inventory:</b> Sentinel refreshes connected sources every 15 minutes. Credentials are encrypted at rest and never returned to the browser.</div>
-    {error&&<div className="error storage-error">{error}</div>}
-    {sources.length===0?<div className="empty-state panel"><h2>No inventory sources connected</h2><p>Connect Home Assistant or Pi-hole using its private LAN URL.</p></div>:<div className="source-grid">{sources.map(source=><article className="panel source-card" key={source.id}><div><p className="eyebrow">{source.kind==="pihole"?"PI-HOLE":"HOME ASSISTANT"}</p><h2>{source.name}</h2><small>{source.base_url}</small></div><div className="source-counts"><b>{source.device_count}<small>Seen</small></b><b>{source.importable_count}<small>Ready</small></b><b>{source.imported_count}<small>Imported</small></b></div>{source.kind==="pihole"&&source.summary&&<PiHoleSummary summary={source.summary}/>}<p><i className={`status-dot ${source.last_sync_status==="ok"?"up":source.last_sync_status==="failed"?"down":"paused"}`}/>{source.last_sync_status}{source.last_sync_at&&` · ${new Date(source.last_sync_at).toLocaleString()}`}</p>{source.last_sync_error&&<div className="error">{source.last_sync_error}</div>}<div className="row-actions"><button onClick={()=>void inspect(source)}>Review devices</button><button onClick={()=>void sync(source)} disabled={busy===source.id}>{busy===source.id?"Syncing…":"Sync now"}</button><button className="danger" onClick={()=>void remove(source)} disabled={busy===source.id}>Disconnect</button></div></article>)}</div>}
-    {adding&&<div className="modal-backdrop"><form className="device-form panel" onSubmit={create}><div className="panel-title"><div><p className="eyebrow">PRIVATE INVENTORY SOURCE</p><h2>Connect {adding==="pihole"?"Pi-hole":"Home Assistant"}</h2></div><button type="button" className="close" onClick={()=>setAdding(false)}>×</button></div><label>Name<input name="name" required defaultValue={adding==="pihole"?"Pi-hole":"Home Assistant"} maxLength={100}/></label><label>Private URL<input name="url" type="url" required placeholder={adding==="pihole"?"http://pi.hole":"http://10.0.0.50:8123"}/></label><label>{adding==="pihole"?"API key or application password":"Long-lived access token"}<textarea name="token" required rows={5} autoComplete="off"/></label><p className="quiet">{adding==="pihole"?"Paste a legacy Pi-hole API key or a Pi-hole v6 application password. Sentinel detects the API version automatically.":"Create the token from your Home Assistant profile. Use a dedicated, least-privilege account when possible."}</p><div className="form-actions"><button type="button" onClick={()=>setAdding(false)}>Cancel</button><button className="primary compact" disabled={busy==="create"}>{busy==="create"?"Connecting…":"Connect and sync"}</button></div></form></div>}
-    {selectedSource&&<div className="modal-backdrop"><div className="panel source-devices"><div className="panel-title"><div><p className="eyebrow">STAGED INVENTORY</p><h2>{selectedSource.name} devices</h2></div><button className="close" onClick={()=>setSelectedSource(null)}>×</button></div><div className="source-import-bar"><span>{selected.size} selected</span><button onClick={()=>setSelected(new Set(devices.filter(item=>!item.imported_device_id).map(item=>item.id)))}>Select importable</button><button className="primary compact" disabled={!selected.size||busy==="import"} onClick={()=>void importSelected()}>{busy==="import"?"Importing…":"Import selected"}</button></div><div className="source-device-list">{devices.map(item=>{const selectable=!item.imported_device_id;return <label className={`source-device ${item.imported_device_id?"imported":""}`} key={item.id}><input type="checkbox" disabled={!selectable} checked={selected.has(item.id)} onChange={()=>toggle(item.id)}/><span><b>{item.name}</b><small>{[item.manufacturer,item.model,item.area_name].filter(Boolean).join(" · ")||"Network identity"}</small></span><span><b>{item.address||"Identity only"}</b><small>{item.mac_address||"Home Assistant identity"}</small></span><em>{item.imported_device_id?"Imported":item.address?"Address ready":item.mac_address?"MAC identity":"HA identity"}</em></label>})}</div></div></div>}
-  </>;
+export function SourcesPage({
+  sources,
+  csrf,
+  refresh,
+  refreshDevices,
+}: {
+  sources: InventorySource[];
+  csrf: string;
+  refresh: () => Promise<void>;
+  refreshDevices: () => Promise<void>;
+}) {
+  const [adding, setAdding] = useState<"home_assistant" | "pihole" | false>(
+      false,
+    ),
+    [busy, setBusy] = useState(""),
+    [error, setError] = useState("");
+  const [selectedSource, setSelectedSource] = useState<InventorySource | null>(
+      null,
+    ),
+    [devices, setDevices] = useState<SourceDevice[]>([]),
+    [selected, setSelected] = useState<Set<string>>(new Set()),
+    [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!adding) return;
+    setBusy("create");
+    setError("");
+    const data = new FormData(event.currentTarget);
+    try {
+      const source = await api.createSource(
+        {
+          kind: adding,
+          name: data.get("name"),
+          base_url: data.get("url"),
+          token: data.get("token"),
+        },
+        csrf,
+      );
+      setAdding(false);
+      await api.syncSource(source.id, csrf);
+      await refresh();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not connect inventory source",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+  async function sync(source: InventorySource) {
+    setBusy(source.id);
+    setError("");
+    try {
+      const updated = await api.syncSource(source.id, csrf);
+      await refresh();
+      if (selectedSource?.id === source.id) {
+        setSelectedSource(updated);
+        setDevices(await api.sourceDevices(source.id));
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Sync failed");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function inspect(source: InventorySource) {
+    setSelectedSource(source);
+    setSelected(new Set());
+    const incoming = await api.sourceDevices(source.id);
+    setDevices(incoming);
+    setNameDrafts(
+      Object.fromEntries(
+        incoming.map((item) => [item.id, item.custom_name || item.name]),
+      ),
+    );
+  }
+  async function remove(source: InventorySource) {
+    if (
+      !confirm(
+        `Disconnect ${source.name}? Imported devices will remain in Sentinel.`,
+      )
+    )
+      return;
+    setBusy(source.id);
+    setError("");
+    try {
+      await api.deleteSource(source.id, csrf);
+      await refresh();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Could not disconnect source",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+  function toggle(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  async function importSelected() {
+    if (!selectedSource || !selected.size) return;
+    setBusy("import");
+    try {
+      await api.importSourceDevices(selectedSource.id, [...selected], csrf);
+      setDevices(await api.sourceDevices(selectedSource.id));
+      setSelected(new Set());
+      await refresh();
+      await refreshDevices();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Import failed");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function saveName(item: SourceDevice) {
+    if (!selectedSource) return;
+    const name = (nameDrafts[item.id] || "").trim();
+    if (!name || name === (item.custom_name || item.name)) return;
+    setBusy(`name:${item.id}`);
+    setError("");
+    try {
+      const updated = await api.renameSourceDevice(
+        selectedSource.id,
+        item.id,
+        name,
+        csrf,
+      );
+      setDevices((current) =>
+        current.map((candidate) =>
+          candidate.id === updated.id ? updated : candidate,
+        ),
+      );
+      await refreshDevices();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Could not rename device",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <>
+      <header>
+        <div>
+          <p className="eyebrow">CONNECTED INVENTORY</p>
+          <h1>Sources</h1>
+          <p>Pull devices from systems that already understand your network.</p>
+        </div>
+        <div className="row-actions">
+          <button onClick={() => setAdding("home_assistant")}>
+            + Home Assistant
+          </button>
+          <button
+            className="primary compact"
+            onClick={() => setAdding("pihole")}
+          >
+            + Pi-hole
+          </button>
+        </div>
+      </header>
+      <div className="notice panel">
+        <b>Automatic network inventory:</b> Sentinel refreshes connected sources
+        every 15 minutes. Credentials are encrypted at rest and never returned
+        to the browser.
+      </div>
+      {error && <div className="error storage-error">{error}</div>}
+      {sources.length === 0 ? (
+        <div className="empty-state panel">
+          <h2>No inventory sources connected</h2>
+          <p>Connect Home Assistant or Pi-hole using its private LAN URL.</p>
+        </div>
+      ) : (
+        <div className="source-grid">
+          {sources.map((source) => (
+            <article className="panel source-card" key={source.id}>
+              <div>
+                <p className="eyebrow">
+                  {source.kind === "pihole" ? "PI-HOLE" : "HOME ASSISTANT"}
+                </p>
+                <h2>{source.name}</h2>
+                <small>{source.base_url}</small>
+              </div>
+              <div className="source-counts">
+                <b>
+                  {source.device_count}
+                  <small>Seen</small>
+                </b>
+                <b>
+                  {source.importable_count}
+                  <small>Ready</small>
+                </b>
+                <b>
+                  {source.imported_count}
+                  <small>Imported</small>
+                </b>
+              </div>
+              {source.kind === "pihole" && source.summary && (
+                <PiHoleSummary summary={source.summary} />
+              )}
+              <p>
+                <i
+                  className={`status-dot ${source.last_sync_status === "ok" ? "up" : source.last_sync_status === "failed" ? "down" : "paused"}`}
+                />
+                {source.last_sync_status}
+                {source.last_sync_at &&
+                  ` · ${new Date(source.last_sync_at).toLocaleString()}`}
+              </p>
+              {source.last_sync_error && (
+                <div className="error">{source.last_sync_error}</div>
+              )}
+              <div className="row-actions">
+                <button onClick={() => void inspect(source)}>
+                  Review devices
+                </button>
+                <button
+                  onClick={() => void sync(source)}
+                  disabled={busy === source.id}
+                >
+                  {busy === source.id ? "Syncing…" : "Sync now"}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => void remove(source)}
+                  disabled={busy === source.id}
+                >
+                  Disconnect
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {adding && (
+        <div className="modal-backdrop">
+          <form className="device-form panel" onSubmit={create}>
+            <div className="panel-title">
+              <div>
+                <p className="eyebrow">PRIVATE INVENTORY SOURCE</p>
+                <h2>
+                  Connect {adding === "pihole" ? "Pi-hole" : "Home Assistant"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="close"
+                onClick={() => setAdding(false)}
+              >
+                ×
+              </button>
+            </div>
+            <label>
+              Name
+              <input
+                name="name"
+                required
+                defaultValue={
+                  adding === "pihole" ? "Pi-hole" : "Home Assistant"
+                }
+                maxLength={100}
+              />
+            </label>
+            <label>
+              Private URL
+              <input
+                name="url"
+                type="url"
+                required
+                placeholder={
+                  adding === "pihole"
+                    ? "http://pi.hole"
+                    : "http://10.0.0.50:8123"
+                }
+              />
+            </label>
+            <label>
+              {adding === "pihole"
+                ? "API key or application password"
+                : "Long-lived access token"}
+              <textarea name="token" required rows={5} autoComplete="off" />
+            </label>
+            <p className="quiet">
+              {adding === "pihole"
+                ? "Paste a legacy Pi-hole API key or a Pi-hole v6 application password. Sentinel detects the API version automatically."
+                : "Create the token from your Home Assistant profile. Use a dedicated, least-privilege account when possible."}
+            </p>
+            <div className="form-actions">
+              <button type="button" onClick={() => setAdding(false)}>
+                Cancel
+              </button>
+              <button className="primary compact" disabled={busy === "create"}>
+                {busy === "create" ? "Connecting…" : "Connect and sync"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {selectedSource && (
+        <div className="modal-backdrop">
+          <div className="panel source-devices">
+            <div className="panel-title">
+              <div>
+                <p className="eyebrow">STAGED INVENTORY</p>
+                <h2>{selectedSource.name} devices</h2>
+              </div>
+              <button className="close" onClick={() => setSelectedSource(null)}>
+                ×
+              </button>
+            </div>
+            <div className="source-import-bar">
+              <span>{selected.size} selected</span>
+              <button
+                onClick={() =>
+                  setSelected(
+                    new Set(
+                      devices
+                        .filter((item) => !item.imported_device_id)
+                        .map((item) => item.id),
+                    ),
+                  )
+                }
+              >
+                Select importable
+              </button>
+              <button
+                className="primary compact"
+                disabled={!selected.size || busy === "import"}
+                onClick={() => void importSelected()}
+              >
+                {busy === "import" ? "Importing…" : "Import selected"}
+              </button>
+            </div>
+            <div className="source-device-list">
+              {devices.map((item) => {
+                const selectable = !item.imported_device_id;
+                return (
+                  <div
+                    className={`source-device ${item.imported_device_id ? "imported" : ""}`}
+                    key={item.id}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!selectable}
+                      checked={selected.has(item.id)}
+                      onChange={() => toggle(item.id)}
+                    />
+                    <span className="source-device-name">
+                      <input
+                        aria-label={`Display name for ${item.name}`}
+                        value={
+                          nameDrafts[item.id] ?? item.custom_name ?? item.name
+                        }
+                        maxLength={100}
+                        disabled={busy === `name:${item.id}`}
+                        onChange={(event) =>
+                          setNameDrafts((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={() => void saveName(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                      />
+                      <small>
+                        {item.custom_name && `From HA: ${item.name} · `}
+                        {[item.manufacturer, item.model, item.area_name]
+                          .filter(Boolean)
+                          .join(" · ") || "Network identity"}
+                      </small>
+                    </span>
+                    <span>
+                      <b>{item.address || "Identity only"}</b>
+                      <small>
+                        {item.mac_address || "Home Assistant identity"}
+                      </small>
+                    </span>
+                    <em>
+                      {item.imported_device_id
+                        ? "Imported"
+                        : item.address
+                          ? "Address ready"
+                          : item.mac_address
+                            ? "MAC identity"
+                            : "HA identity"}
+                    </em>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
-function PiHoleSummary({summary}:{summary:Record<string,unknown>}){
-  const queries=(summary.queries||{}) as Record<string,number>,clients=(summary.clients||{}) as Record<string,number>,gravity=(summary.gravity||{}) as Record<string,number>;
-  return <div className="pihole-summary"><span><b>{summary.blocking?"On":"Off"}</b><small>Blocking</small></span><span><b>{queries.total||0}</b><small>Queries</small></span><span><b>{queries.blocked||0}</b><small>Blocked</small></span><span><b>{clients.active||0}/{clients.total||0}</b><small>Clients</small></span><span><b>{gravity.domains_being_blocked||0}</b><small>Domains</small></span></div>
+function PiHoleSummary({ summary }: { summary: Record<string, unknown> }) {
+  const queries = (summary.queries || {}) as Record<string, number>,
+    clients = (summary.clients || {}) as Record<string, number>,
+    gravity = (summary.gravity || {}) as Record<string, number>;
+  return (
+    <div className="pihole-summary">
+      <span>
+        <b>{summary.blocking ? "On" : "Off"}</b>
+        <small>Blocking</small>
+      </span>
+      <span>
+        <b>{queries.total || 0}</b>
+        <small>Queries</small>
+      </span>
+      <span>
+        <b>{queries.blocked || 0}</b>
+        <small>Blocked</small>
+      </span>
+      <span>
+        <b>
+          {clients.active || 0}/{clients.total || 0}
+        </b>
+        <small>Clients</small>
+      </span>
+      <span>
+        <b>{gravity.domains_being_blocked || 0}</b>
+        <small>Domains</small>
+      </span>
+    </div>
+  );
 }
