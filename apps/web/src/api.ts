@@ -43,6 +43,7 @@ export type ActionItem = {finding_id:string;cve_id:string;title:string;severity:
 export type Agent = {id:string;device_id:string;device_name:string;version:string;executor_version:string|null;platform:string;hostname:string|null;os_name:string|null;os_version:string|null;kernel_version:string|null;last_heartbeat_at:string|null;connected:boolean;cpu_percent:number|null;memory_percent:number|null;disk_percent:number|null;disk_free_bytes:number|null;uptime_seconds:number|null;package_count:number;container_count:number};
 export type ContainerInstance = {id:string;agent_id:string;device_id:string;device_name:string;hostname:string|null;container_id:string;name:string;image:string;state:string;health:string|null;status:string|null;ports:string|null;restart_count:number;present:boolean;observed_at:string;stale:boolean};
 export type ContainerEvent = {id:string;agent_id:string;device_name:string;container_id:string;container_name:string;kind:string;severity:string;message:string;acknowledged_at:string|null;occurred_at:string};
+export type AlertDefaults = {failure_threshold:number;retry_interval_seconds:number};
 export type InventorySource = {id:string;name:string;kind:string;base_url:string;enabled:boolean;last_sync_at:string|null;last_sync_status:string;last_sync_error:string|null;device_count:number;importable_count:number;imported_count:number;summary:Record<string,unknown>|null};
 export type SourceDevice = {id:string;external_id:string;name:string;address:string|null;mac_address:string|null;manufacturer:string|null;model:string|null;area_name:string|null;imported_device_id:string|null};
 export type NetworkAsset = {id:string;name:string;address:string|null;mac_address:string|null;status:string;sources:string[];observations:number;linked:boolean;last_seen_at:string|null;observation_ids:string[]};
@@ -123,6 +124,8 @@ export const api = {
   checkDevice: (id: string, csrfToken: string) =>
     request<Device>(`/api/v1/devices/${id}/check`, { method: "POST", headers: { "X-CSRF-Token": csrfToken } }),
   monitors: () => request<ServiceMonitor[]>("/api/v1/monitors"),
+  alertDefaults: () => request<AlertDefaults>("/api/v1/monitors/alert-defaults"),
+  updateAlertDefaults: (payload:AlertDefaults&{apply_to_existing:boolean},csrfToken:string) => request<AlertDefaults>("/api/v1/monitors/alert-defaults",{method:"PUT",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify(payload)}),
   createMonitor: (payload: Record<string, unknown>, csrfToken: string) =>
     request<ServiceMonitor>("/api/v1/monitors", { method:"POST", headers:{"X-CSRF-Token":csrfToken}, body:JSON.stringify(payload) }),
   updateMonitor: (id:string, payload:Record<string,unknown>, csrfToken:string) =>
@@ -180,6 +183,7 @@ export const api = {
   containers: () => request<ContainerInstance[]>("/api/v1/containers"),
   containerEvents: () => request<ContainerEvent[]>("/api/v1/containers/events"),
   acknowledgeContainerEvent: (id:string,csrfToken:string) => request<ContainerEvent>(`/api/v1/containers/events/${id}/acknowledge`,{method:"POST",headers:{"X-CSRF-Token":csrfToken}}),
+  acknowledgeContainerEvents: (ids:string[],csrfToken:string) => request<void>("/api/v1/containers/bulk/events/acknowledge",{method:"POST",headers:{"X-CSRF-Token":csrfToken},body:JSON.stringify({ids})}),
   sources: () => request<InventorySource[]>("/api/v1/sources"),
   networkInventory: () => request<NetworkAsset[]>("/api/v1/sources/network-inventory"),
   networkActivity: () => request<NetworkIdentityEvent[]>("/api/v1/sources/network-activity"),

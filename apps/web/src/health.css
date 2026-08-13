@@ -1,0 +1,21 @@
+.agent-pressure-reason {
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border: 1px solid #efd28b;
+  border-radius: 8px;
+  background: #fff5dc;
+  color: #765000;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.network-alert-list article {
+  position: relative;
+}
+
+.network-alert-list article > input[type="checkbox"] {
+  position: absolute;
+  left: 19px;
+  width: 16px;
+  height: 16px;
+}

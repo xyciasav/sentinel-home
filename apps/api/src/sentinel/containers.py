@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +98,10 @@ class ContainerEventView(BaseModel):
     occurred_at: datetime
 
 
+class BulkAcknowledgeRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
 @router.get("/events", response_model=list[ContainerEventView])
 async def list_container_events(
     database: Annotated[AsyncSession, Depends(get_session)],
@@ -162,3 +166,32 @@ async def acknowledge_container_event(
         },
         device_name=device_name,
     )
+
+
+@router.post("/bulk/events/acknowledge", status_code=204)
+async def acknowledge_container_events(
+    payload: BulkAcknowledgeRequest,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, Session], Depends(csrf_protected_session)],
+) -> None:
+    events = list(
+        await database.scalars(
+            select(ContainerEvent).where(
+                ContainerEvent.id.in_(payload.ids),
+                ContainerEvent.acknowledged_at.is_(None),
+            )
+        )
+    )
+    acknowledged_at = datetime.now(UTC)
+    for event in events:
+        event.acknowledged_at = acknowledged_at
+        event.acknowledged_by = auth[0].id
+        database.add(
+            AuditEvent(
+                actor_user_id=auth[0].id,
+                action="container.event.acknowledge.bulk",
+                target_type="container_event",
+                target_id=str(event.id),
+            )
+        )
+    await database.commit()

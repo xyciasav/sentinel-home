@@ -202,6 +202,15 @@ class ServiceMonitor(Base):
     results: Mapped[list["MonitorResult"]] = relationship(cascade="all, delete-orphan")
 
 
+class AlertDefaults(Base):
+    __tablename__ = "alert_defaults"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    failure_threshold: Mapped[int] = mapped_column(Integer, default=3)
+    retry_interval_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class MonitorResult(Base):
     __tablename__ = "monitor_results"
     __table_args__ = (Index("ix_monitor_results_monitor_checked", "monitor_id", "checked_at"),)
