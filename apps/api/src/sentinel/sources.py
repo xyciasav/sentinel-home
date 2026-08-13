@@ -119,6 +119,8 @@ class PiHoleTrafficView(BaseModel):
     api_mode: str
     data_source: str
     last_sync_error: str | None
+    sample: dict
+    signals: list[dict]
 
 
 def safe_base_url(value: str) -> str:
@@ -331,17 +333,22 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
         optional_response_json(clients_response),
         optional_response_json(blocked_domains_response),
     )
+    query_traffic = (
+        aggregate_pihole_queries(optional_response_json(queries_response).get("queries") or [])
+        if queries_response is not None and queries_response.is_success
+        else None
+    )
     if (
         not any(traffic.get(key) for key in ("top_domains", "top_blocked_domains", "top_clients"))
-        and queries_response is not None
-        and queries_response.is_success
+        and query_traffic
     ):
-        traffic = aggregate_pihole_queries(
-            optional_response_json(queries_response).get("queries") or []
-        )
+        traffic = query_traffic
         traffic["data_source"] = "recent query log"
     else:
         traffic["data_source"] = "ranking endpoints"
+        if query_traffic:
+            traffic["sample"] = query_traffic["sample"]
+            traffic["signals"] = query_traffic["signals"]
     traffic["api_mode"] = "v6"
     traffic["endpoint_status"] = {
         "domains": optional_response_status(domains_response),
@@ -452,6 +459,8 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
     clients: dict[str, int] = {}
     permitted: dict[str, int] = {}
     blocked: dict[str, int] = {}
+    statuses: dict[str, int] = {}
+    query_types: dict[str, int] = {}
     blocked_statuses = {
         "GRAVITY",
         "REGEX",
@@ -468,6 +477,10 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
         if not isinstance(query, dict):
             continue
         domain = str(query.get("domain") or "").strip()
+        status_name = str(query.get("status") or "UNKNOWN").upper()
+        query_type = str(query.get("type") or "OTHER").upper()
+        statuses[status_name] = statuses.get(status_name, 0) + 1
+        query_types[query_type] = query_types.get(query_type, 0) + 1
         client = query.get("client") or {}
         identity = (
             str(client.get("name") or client.get("ip") or "").strip()
@@ -477,9 +490,7 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
         if identity:
             clients[identity] = clients.get(identity, 0) + 1
         if domain:
-            target = (
-                blocked if str(query.get("status") or "").upper() in blocked_statuses else permitted
-            )
+            target = blocked if status_name in blocked_statuses else permitted
             target[domain] = target.get(domain, 0) + 1
 
     def ranked(values: dict[str, int], label: str) -> list[dict]:
@@ -488,11 +499,103 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
             for name, count in sorted(values.items(), key=lambda item: item[1], reverse=True)[:25]
         ]
 
+    sample_count = sum(statuses.values())
+    blocked_count = sum(count for name, count in statuses.items() if name in blocked_statuses)
+    nxdomain_count = 0
+    error_count = 0
+    for query in queries:
+        if not isinstance(query, dict):
+            continue
+        reply = query.get("reply") or {}
+        reply_type = (
+            str(reply.get("type") or "").upper() if isinstance(reply, dict) else str(reply).upper()
+        )
+        nxdomain_count += reply_type == "NXDOMAIN"
+        error_count += reply_type in {"SERVFAIL", "REFUSED"}
+    top_client_count = max(clients.values(), default=0)
+    top_client_name = max(clients, key=clients.get) if clients else None
     return {
         "top_clients": ranked(clients, "client"),
         "top_domains": ranked(permitted, "domain"),
         "top_blocked_domains": ranked(blocked, "domain"),
+        "sample": {
+            "queries": sample_count,
+            "unique_domains": len(permitted) + len(blocked),
+            "blocked": blocked_count,
+            "nxdomain": nxdomain_count,
+            "errors": error_count,
+            "query_types": query_types,
+        },
+        "signals": traffic_signals(
+            sample_count,
+            blocked_count,
+            nxdomain_count,
+            error_count,
+            top_client_name,
+            top_client_count,
+        ),
     }
+
+
+def traffic_signals(
+    sample_count: int,
+    blocked_count: int,
+    nxdomain_count: int,
+    error_count: int,
+    top_client_name: str | None,
+    top_client_count: int,
+) -> list[dict]:
+    if not sample_count:
+        return []
+    signals = []
+    if nxdomain_count >= 25 and nxdomain_count / sample_count >= 0.15:
+        signals.append(
+            {
+                "kind": "nxdomain_rate",
+                "severity": "medium",
+                "message": (
+                    f"{nxdomain_count / sample_count:.0%} of recent queries returned NXDOMAIN."
+                ),
+                "detail": (
+                    "This can indicate a broken client, typo loop, "
+                    "or domain-generation behavior."
+                ),
+            }
+        )
+    if error_count >= 20 and error_count / sample_count >= 0.1:
+        signals.append(
+            {
+                "kind": "dns_errors",
+                "severity": "medium",
+                "message": f"{error_count} recent DNS requests failed or were refused.",
+                "detail": "Review upstream DNS health and the clients generating these requests.",
+            }
+        )
+    if blocked_count >= 50 and blocked_count / sample_count >= 0.4:
+        signals.append(
+            {
+                "kind": "blocked_rate",
+                "severity": "low",
+                "message": f"{blocked_count / sample_count:.0%} of the recent sample was blocked.",
+                "detail": "This is often ad-heavy software, but a sudden change deserves review.",
+            }
+        )
+    if top_client_name and sample_count >= 100 and top_client_count / sample_count >= 0.7:
+        signals.append(
+            {
+                "kind": "chatty_client",
+                "severity": "low",
+                "message": (
+                    f"{top_client_name} generated "
+                    f"{top_client_count / sample_count:.0%} of recent DNS traffic."
+                ),
+                "detail": (
+                    "A single dominant client may be expected, "
+                    "misconfigured, or unusually active."
+                ),
+            }
+        )
+    return signals
 
 
 def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | None = None) -> dict:
@@ -947,6 +1050,8 @@ async def pihole_traffic(
                 api_mode=str(traffic.get("api_mode") or "unknown"),
                 data_source=str(traffic.get("data_source") or "unavailable"),
                 last_sync_error=source.last_sync_error,
+                sample=traffic.get("sample") or {},
+                signals=traffic.get("signals") or [],
             )
         )
     return result

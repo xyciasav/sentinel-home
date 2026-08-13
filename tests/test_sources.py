@@ -8,6 +8,7 @@ from sentinel.sources import (
     pihole_api_base,
     safe_base_url,
     traffic_diagnostics,
+    traffic_signals,
     websocket_url,
 )
 
@@ -143,6 +144,8 @@ def test_pihole_query_log_fallback_builds_rankings() -> None:
     assert traffic["top_domains"][0] == {"domain": "example.com", "count": 2}
     assert traffic["top_blocked_domains"][0]["domain"] == "ads.example"
     assert traffic["top_clients"][0] == {"client": "laptop", "count": 2}
+    assert traffic["sample"]["queries"] == 3
+    assert traffic["sample"]["unique_domains"] == 2
 
 
 def test_pihole_query_log_accepts_legacy_string_client() -> None:
@@ -156,3 +159,8 @@ def test_pihole_diagnostics_prioritizes_sync_failure() -> None:
     assert traffic_diagnostics(100, {}, "authentication failed") == [
         "Pi-hole synchronization failed: authentication failed"
     ]
+
+
+def test_pihole_signals_identify_chatty_client_and_nxdomain_rate() -> None:
+    signals = traffic_signals(200, 10, 40, 0, "camera.lan", 150)
+    assert {item["kind"] for item in signals} == {"nxdomain_rate", "chatty_client"}

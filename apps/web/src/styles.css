@@ -1715,10 +1715,9 @@ header > div > p:last-child {
 }
 .container-row {
   display: grid;
-  grid-template-columns: 12px minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(
-      220px,
-      1.2fr
-    ) minmax(190px, 1fr) auto;
+  grid-template-columns:
+    12px minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(220px, 1.2fr)
+    minmax(190px, 1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 18px 8px;
@@ -2094,6 +2093,21 @@ header > div > p:last-child {
   display: block;
   width: fit-content;
   margin-top: 6px;
+}
+.dns-sample-grid {
+  margin-top: -8px;
+}
+.dns-signals {
+  margin-bottom: 16px;
+}
+.dns-signals article {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #e8eeeb;
+}
+.dns-signals article small {
+  display: block;
 }
 .traffic-empty p,
 .traffic-empty small,

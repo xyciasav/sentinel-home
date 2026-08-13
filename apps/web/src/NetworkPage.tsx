@@ -181,7 +181,20 @@ function DnsTraffic({
     blocked = items.reduce((sum, item) => sum + (item.queries.blocked || 0), 0),
     anomalies = items.flatMap((item) =>
       item.anomalies.map((alert) => ({ ...alert, source: item.source_name })),
-    );
+    ),
+    signals = items.flatMap((item) =>
+      item.signals.map((signal) => ({ ...signal, source: item.source_name })),
+    ),
+    sampled = items.reduce((sum, item) => sum + (item.sample.queries || 0), 0),
+    uniqueDomains = items.reduce(
+      (sum, item) => sum + (item.sample.unique_domains || 0),
+      0,
+    ),
+    nxdomain = items.reduce(
+      (sum, item) => sum + (item.sample.nxdomain || 0),
+      0,
+    ),
+    dnsErrors = items.reduce((sum, item) => sum + (item.sample.errors || 0), 0);
   return (
     <>
       <header>
@@ -248,6 +261,51 @@ function DnsTraffic({
               <small>Traffic samples learned</small>
             </article>
           </section>
+          {sampled > 0 && (
+            <section className="status-grid dns-sample-grid">
+              <article className="status-card">
+                <p>Recent sample</p>
+                <strong>{sampled.toLocaleString()}</strong>
+                <small>Latest query-log records analyzed</small>
+              </article>
+              <article className="status-card">
+                <p>Unique domains</p>
+                <strong>{uniqueDomains.toLocaleString()}</strong>
+                <small>Across the recent sample</small>
+              </article>
+              <article className="status-card">
+                <p>NXDOMAIN</p>
+                <strong>{nxdomain.toLocaleString()}</strong>
+                <small>Names that did not resolve</small>
+              </article>
+              <article className="status-card">
+                <p>DNS failures</p>
+                <strong>{dnsErrors.toLocaleString()}</strong>
+                <small>SERVFAIL or refused replies</small>
+              </article>
+            </section>
+          )}
+          {signals.length > 0 && (
+            <section className="panel dns-signals">
+              <div className="panel-title">
+                <div>
+                  <p className="eyebrow">TRAFFIC OBSERVATIONS</p>
+                  <h2>Patterns worth reviewing</h2>
+                </div>
+              </div>
+              {signals.map((signal, index) => (
+                <article key={`${signal.kind}-${index}`}>
+                  <i className={`alert-severity ${signal.severity}`} />
+                  <div>
+                    <b>{signal.message}</b>
+                    <small>
+                      {signal.source} · {signal.detail}
+                    </small>
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
           {anomalies.length > 0 && (
             <section className="panel dns-anomalies">
               <div className="panel-title">

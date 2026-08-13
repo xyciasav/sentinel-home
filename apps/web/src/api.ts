@@ -521,6 +521,20 @@ export type PiHoleTraffic = {
   api_mode: string;
   data_source: string;
   last_sync_error: string | null;
+  sample: {
+    queries?: number;
+    unique_domains?: number;
+    blocked?: number;
+    nxdomain?: number;
+    errors?: number;
+    query_types?: Record<string, number>;
+  };
+  signals: {
+    kind: string;
+    severity: string;
+    message: string;
+    detail: string;
+  }[];
 };
 export type AgentEnrollment = { enrollment_token: string; expires_at: string };
 export type AgentMetric = {
