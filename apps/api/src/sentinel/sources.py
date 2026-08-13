@@ -118,6 +118,7 @@ class PiHoleTrafficView(BaseModel):
     diagnostics: list[str]
     api_mode: str
     data_source: str
+    last_sync_error: str | None
 
 
 def safe_base_url(value: str) -> str:
@@ -242,6 +243,30 @@ async def fetch_pihole(source: InventorySource) -> tuple[list[dict], dict]:
             ) from v6_error
 
 
+async def optional_pihole_get(
+    client: httpx.AsyncClient, url: str, **kwargs
+) -> httpx.Response | None:
+    try:
+        return await client.get(url, **kwargs)
+    except httpx.HTTPError as error:
+        logger.warning("optional Pi-hole traffic request failed for %s: %s", url, error)
+        return None
+
+
+def optional_response_json(response: httpx.Response | None) -> dict:
+    if response is None or not response.is_success:
+        return {}
+    try:
+        value = response.json()
+        return value if isinstance(value, dict) else {}
+    except ValueError:
+        return {}
+
+
+def optional_response_status(response: httpx.Response | None) -> int:
+    return response.status_code if response is not None else 0
+
+
 async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dict]:
     async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
         authentication = await client.post(f"{base_url}/api/auth", json={"password": password})
@@ -272,42 +297,57 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
             ),
             client.get(f"{base_url}/api/stats/summary", headers=headers),
             client.get(f"{base_url}/api/dns/blocking", headers=headers),
-            client.get(
+            optional_pihole_get(
+                client,
                 f"{base_url}/api/stats/top_domains",
                 headers=headers,
                 params={"count": 25, "blocked": "false"},
             ),
-            client.get(
+            optional_pihole_get(
+                client,
                 f"{base_url}/api/stats/top_domains",
                 headers=headers,
                 params={"count": 25, "blocked": "true"},
             ),
-            client.get(f"{base_url}/api/stats/top_clients", headers=headers, params={"count": 25}),
-            client.get(f"{base_url}/api/queries", headers=headers, params={"length": 1000}),
+            optional_pihole_get(
+                client,
+                f"{base_url}/api/stats/top_clients",
+                headers=headers,
+                params={"count": 25},
+            ),
+            optional_pihole_get(
+                client,
+                f"{base_url}/api/queries",
+                headers=headers,
+                params={"length": 1000},
+            ),
         )
         for response in (devices_response, summary_response, blocking_response):
             response.raise_for_status()
         await client.delete(f"{base_url}/api/auth", headers=headers)
     raw_summary = summary_response.json()
     traffic = parse_pihole_traffic(
-        domains_response.json() if domains_response.is_success else {},
-        clients_response.json() if clients_response.is_success else {},
-        blocked_domains_response.json() if blocked_domains_response.is_success else {},
+        optional_response_json(domains_response),
+        optional_response_json(clients_response),
+        optional_response_json(blocked_domains_response),
     )
     if (
         not any(traffic.get(key) for key in ("top_domains", "top_blocked_domains", "top_clients"))
+        and queries_response is not None
         and queries_response.is_success
     ):
-        traffic = aggregate_pihole_queries(queries_response.json().get("queries") or [])
+        traffic = aggregate_pihole_queries(
+            optional_response_json(queries_response).get("queries") or []
+        )
         traffic["data_source"] = "recent query log"
     else:
         traffic["data_source"] = "ranking endpoints"
     traffic["api_mode"] = "v6"
     traffic["endpoint_status"] = {
-        "domains": domains_response.status_code,
-        "blocked_domains": blocked_domains_response.status_code,
-        "clients": clients_response.status_code,
-        "query_log": queries_response.status_code,
+        "domains": optional_response_status(domains_response),
+        "blocked_domains": optional_response_status(blocked_domains_response),
+        "clients": optional_response_status(clients_response),
+        "query_log": optional_response_status(queries_response),
     }
     summary = {
         "blocking": bool(blocking_response.json().get("blocking")),
@@ -429,7 +469,11 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
             continue
         domain = str(query.get("domain") or "").strip()
         client = query.get("client") or {}
-        identity = str(client.get("name") or client.get("ip") or "").strip()
+        identity = (
+            str(client.get("name") or client.get("ip") or "").strip()
+            if isinstance(client, dict)
+            else str(client).strip()
+        )
         if identity:
             clients[identity] = clients.get(identity, 0) + 1
         if domain:
@@ -479,7 +523,11 @@ def parse_pihole_traffic(domains: dict, clients: dict, blocked_domains: dict | N
     }
 
 
-def traffic_diagnostics(total_queries: int, traffic: dict) -> list[str]:
+def traffic_diagnostics(
+    total_queries: int, traffic: dict, sync_error: str | None = None
+) -> list[str]:
+    if sync_error:
+        return [f"Pi-hole synchronization failed: {sync_error}"]
     has_domains = bool(traffic.get("top_domains") or traffic.get("top_blocked_domains"))
     has_clients = bool(traffic.get("top_clients"))
     statuses = traffic.get("endpoint_status") or {}
@@ -892,10 +940,13 @@ async def pihole_traffic(
                 anomalies=traffic.get("anomalies") or [],
                 baseline_samples=int((summary.get("traffic_baseline") or {}).get("samples") or 0),
                 diagnostics=traffic_diagnostics(
-                    int((summary.get("queries") or {}).get("total") or 0), traffic
+                    int((summary.get("queries") or {}).get("total") or 0),
+                    traffic,
+                    source.last_sync_error,
                 ),
                 api_mode=str(traffic.get("api_mode") or "unknown"),
                 data_source=str(traffic.get("data_source") or "unavailable"),
+                last_sync_error=source.last_sync_error,
             )
         )
     return result

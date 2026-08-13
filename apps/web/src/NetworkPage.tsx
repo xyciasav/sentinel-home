@@ -276,10 +276,10 @@ function DnsTraffic({
                   <div>
                     <p className="eyebrow">{item.status.toUpperCase()}</p>
                     <h2>{item.source_name}</h2>
-                    <span className="tag">
+                    <span className="tag pihole-api-mode">
                       Pi-hole API: {item.api_mode} · {item.data_source}
                     </span>
-                    <small>
+                    <small className="pihole-analyzed">
                       {item.collected_at
                         ? `Analyzed ${new Date(item.collected_at).toLocaleString()}`
                         : "Waiting for first sync"}

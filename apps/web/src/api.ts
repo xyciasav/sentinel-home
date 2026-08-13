@@ -520,6 +520,7 @@ export type PiHoleTraffic = {
   diagnostics: string[];
   api_mode: string;
   data_source: string;
+  last_sync_error: string | null;
 };
 export type AgentEnrollment = { enrollment_token: string; expires_at: string };
 export type AgentMetric = {

@@ -143,3 +143,16 @@ def test_pihole_query_log_fallback_builds_rankings() -> None:
     assert traffic["top_domains"][0] == {"domain": "example.com", "count": 2}
     assert traffic["top_blocked_domains"][0]["domain"] == "ads.example"
     assert traffic["top_clients"][0] == {"client": "laptop", "count": 2}
+
+
+def test_pihole_query_log_accepts_legacy_string_client() -> None:
+    traffic = aggregate_pihole_queries(
+        [{"domain": "example.com", "status": "FORWARDED", "client": "10.0.0.8"}]
+    )
+    assert traffic["top_clients"] == [{"client": "10.0.0.8", "count": 1}]
+
+
+def test_pihole_diagnostics_prioritizes_sync_failure() -> None:
+    assert traffic_diagnostics(100, {}, "authentication failed") == [
+        "Pi-hole synchronization failed: authentication failed"
+    ]

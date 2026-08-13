@@ -2089,6 +2089,12 @@ header > div > p:last-child {
   background: #fff8e8;
   color: #59400d;
 }
+.pihole-api-mode,
+.pihole-analyzed {
+  display: block;
+  width: fit-content;
+  margin-top: 6px;
+}
 .traffic-empty p,
 .traffic-empty small,
 .traffic-empty code {
