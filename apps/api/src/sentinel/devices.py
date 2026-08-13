@@ -1,11 +1,11 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,7 +14,9 @@ from sentinel.database import get_session
 from sentinel.models import (
     Agent,
     AgentEnrollment,
+    AgentMetric,
     AuditEvent,
+    ContainerInstance,
     Device,
     DeviceAddress,
     DeviceTrust,
@@ -98,6 +100,55 @@ class DuplicateCandidate(BaseModel):
 
 class MergeInput(BaseModel):
     source_id: uuid.UUID
+
+
+class HostAgentSummary(BaseModel):
+    connected: bool
+    version: str
+    cpu_percent: int | None
+    memory_percent: int | None
+    disk_percent: int | None
+    uptime_seconds: int | None
+    scan_status: str
+    last_scan_at: datetime | None
+    next_scan_at: datetime | None
+    scan_error: str | None
+
+
+class HostServiceSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    status: str
+    url: str
+    response_ms: int | None
+
+
+class HostContainerSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    image: str
+    state: str
+    health: str | None
+    restart_count: int
+
+
+class HostChangeSummary(BaseModel):
+    kind: str
+    port: int
+    service: str | None
+    detected_at: datetime
+
+
+class HostDetailView(BaseModel):
+    device: DeviceView
+    agent: HostAgentSummary | None
+    services: list[HostServiceSummary]
+    containers: list[HostContainerSummary]
+    actionable_vulnerabilities: int
+    informational_vulnerabilities: int
+    critical_high: int
+    known_exploited: int
+    recent_changes: list[HostChangeSummary]
 
 
 def duplicate_evidence(left: Device, right: Device) -> tuple[int, list[str]]:
@@ -230,6 +281,129 @@ async def list_devices(
         select(Device).options(selectinload(Device.addresses)).order_by(Device.display_name)
     )
     return [device_view(device) for device in devices]
+
+
+@router.get("/{device_id}/overview", response_model=HostDetailView)
+async def device_overview(
+    device_id: uuid.UUID,
+    database: Annotated[AsyncSession, Depends(get_session)],
+    _authenticated: Annotated[tuple[User, Session], Depends(authenticated_session)],
+) -> HostDetailView:
+    device = await database.scalar(
+        select(Device).where(Device.id == device_id).options(selectinload(Device.addresses))
+    )
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "device not found")
+    now = datetime.now(UTC)
+    agent = await database.scalar(
+        select(Agent).where(Agent.device_id == device.id, Agent.revoked_at.is_(None))
+    )
+    metric = (
+        await database.scalar(
+            select(AgentMetric)
+            .where(AgentMetric.agent_id == agent.id)
+            .order_by(AgentMetric.collected_at.desc())
+            .limit(1)
+        )
+        if agent
+        else None
+    )
+    services = list(
+        await database.scalars(
+            select(ServiceMonitor)
+            .where(ServiceMonitor.device_id == device.id)
+            .order_by(ServiceMonitor.name)
+        )
+    )
+    containers = (
+        list(
+            await database.scalars(
+                select(ContainerInstance)
+                .where(ContainerInstance.agent_id == agent.id, ContainerInstance.present.is_(True))
+                .order_by(ContainerInstance.name)
+            )
+        )
+        if agent
+        else []
+    )
+    active = (
+        VulnerabilityFinding.device_id == device.id,
+        VulnerabilityFinding.status.in_(("open", "investigating")),
+    )
+    actionable = or_(
+        VulnerabilityFinding.severity != "unknown",
+        VulnerabilityFinding.known_exploited.is_(True),
+    )
+    count = lambda *filters: database.scalar(  # noqa: E731
+        select(func.count(VulnerabilityFinding.id)).where(*filters)
+    )
+    return HostDetailView(
+        device=device_view(device),
+        agent=(
+            HostAgentSummary(
+                connected=bool(
+                    agent.last_heartbeat_at
+                    and (now - agent.last_heartbeat_at).total_seconds() <= 45
+                ),
+                version=agent.version,
+                cpu_percent=metric.cpu_percent if metric else None,
+                memory_percent=metric.memory_percent if metric else None,
+                disk_percent=metric.disk_percent if metric else None,
+                uptime_seconds=metric.uptime_seconds if metric else None,
+                scan_status=agent.vulnerability_scan_status,
+                last_scan_at=agent.last_vulnerability_scan_at,
+                next_scan_at=agent.next_vulnerability_scan_at,
+                scan_error=agent.vulnerability_scan_error,
+            )
+            if agent
+            else None
+        ),
+        services=[
+            HostServiceSummary(
+                id=item.id,
+                name=item.name,
+                status=item.status,
+                url=item.url,
+                response_ms=item.last_response_ms,
+            )
+            for item in services
+        ],
+        containers=[
+            HostContainerSummary(
+                id=item.id,
+                name=item.name,
+                image=item.image,
+                state=item.state,
+                health=item.health,
+                restart_count=item.restart_count,
+            )
+            for item in containers
+        ],
+        actionable_vulnerabilities=int(await count(*active, actionable) or 0),
+        informational_vulnerabilities=int(
+            await count(
+                *active,
+                VulnerabilityFinding.severity == "unknown",
+                VulnerabilityFinding.known_exploited.is_(False),
+            )
+            or 0
+        ),
+        critical_high=int(
+            await count(*active, VulnerabilityFinding.severity.in_(("critical", "high"))) or 0
+        ),
+        known_exploited=int(
+            await count(*active, VulnerabilityFinding.known_exploited.is_(True)) or 0
+        ),
+        recent_changes=[
+            HostChangeSummary.model_validate(item, from_attributes=True)
+            for item in await database.scalars(
+                select(NetworkChange)
+                .where(NetworkChange.device_id == device.id)
+                .order_by(NetworkChange.detected_at.desc())
+                .limit(20)
+            )
+        ],
+    )
 
 
 @router.post("", response_model=DeviceView, status_code=201)

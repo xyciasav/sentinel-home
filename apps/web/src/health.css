@@ -41,3 +41,82 @@
   background: #fff0ef;
   color: #a33a31;
 }
+
+.host-overview {
+  width: min(1180px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.host-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.host-score-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border-radius: 9px;
+  background: #f3f7f5;
+}
+
+.host-score-grid small,
+.host-list small {
+  color: #71807b;
+}
+
+.host-score-grid b {
+  font-size: 20px;
+}
+
+.host-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.host-list {
+  margin-top: 20px;
+  border: 1px solid #e1e8e5;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.host-list h3 {
+  margin: 0;
+  padding: 13px 16px;
+  background: #f5f8f6;
+}
+
+.host-list > div {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 16px;
+  border-top: 1px solid #edf1ef;
+}
+
+.host-list span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.host-list em {
+  color: #71807b;
+  font-size: 11px;
+  font-style: normal;
+}
+
+@media (max-width: 760px) {
+  .host-score-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .host-columns {
+    grid-template-columns: 1fr;
+  }
+}
