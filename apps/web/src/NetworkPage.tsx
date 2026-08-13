@@ -145,7 +145,10 @@ function DnsTraffic({
   const [items, setItems] = useState<PiHoleTraffic[]>([]),
     [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [selectedClient, setSelectedClient] = useState<
+      PiHoleTraffic["top_clients"][number] | null
+    >(null);
   async function load() {
     setLoading(true);
     setError("");
@@ -350,12 +353,9 @@ function DnsTraffic({
                     <span>{message}</span>
                   </div>
                 ))}
-                <TrafficList
-                  title="Busiest clients"
-                  items={item.top_clients.map((x) => ({
-                    name: x.client,
-                    count: x.count,
-                  }))}
+                <ClientTrafficList
+                  items={item.top_clients}
+                  inspect={setSelectedClient}
                 />
                 <TrafficList
                   title="Top permitted domains"
@@ -379,9 +379,102 @@ function DnsTraffic({
             payloads or complete query history. A baseline normally needs four
             successful syncs before volume alerts activate.
           </p>
+          {selectedClient && (
+            <div className="modal-backdrop">
+              <div className="panel dns-client-modal">
+                <div className="panel-title">
+                  <div>
+                    <p className="eyebrow">DNS CLIENT</p>
+                    <h2>
+                      {selectedClient.device_name || selectedClient.client}
+                    </h2>
+                    <small>
+                      {[selectedClient.address, selectedClient.client]
+                        .filter(
+                          (value, index, values) =>
+                            value && values.indexOf(value) === index,
+                        )
+                        .join(" · ")}
+                    </small>
+                  </div>
+                  <button
+                    className="close"
+                    onClick={() => setSelectedClient(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <section className="status-grid dns-client-stats">
+                  <article className="status-card">
+                    <p>Queries</p>
+                    <strong>
+                      {selectedClient.profile?.queries?.toLocaleString() ||
+                        selectedClient.count.toLocaleString()}
+                    </strong>
+                  </article>
+                  <article className="status-card">
+                    <p>Blocked</p>
+                    <strong>
+                      {selectedClient.profile?.blocked?.toLocaleString() || 0}
+                    </strong>
+                  </article>
+                  <article className="status-card">
+                    <p>NXDOMAIN</p>
+                    <strong>
+                      {selectedClient.profile?.nxdomain?.toLocaleString() || 0}
+                    </strong>
+                  </article>
+                </section>
+                <TrafficList
+                  title="Top domains for this client"
+                  items={(selectedClient.profile?.top_domains || []).map(
+                    (item) => ({ name: item.domain, count: item.count }),
+                  )}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </>
+  );
+}
+
+function ClientTrafficList({
+  items,
+  inspect,
+}: {
+  items: PiHoleTraffic["top_clients"];
+  inspect: (item: PiHoleTraffic["top_clients"][number]) => void;
+}) {
+  const max = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <section className="traffic-list client-traffic-list">
+      <h3>Busiest clients</h3>
+      {items.length === 0 ? (
+        <div className="traffic-empty">
+          <p>No ranking data returned.</p>
+          <small>See the diagnostic at the top of this Pi-hole card.</small>
+        </div>
+      ) : (
+        items.slice(0, 10).map((item) => (
+          <button key={item.client} onClick={() => inspect(item)}>
+            <span>
+              <b>{item.device_name || item.client}</b>
+              <small>
+                {item.device_name && `${item.client} · `}
+                {item.count.toLocaleString()}
+              </small>
+            </span>
+            <i>
+              <em
+                style={{ width: `${Math.max(2, (item.count / max) * 100)}%` }}
+              />
+            </i>
+          </button>
+        ))
+      )}
+    </section>
   );
 }
 

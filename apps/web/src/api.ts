@@ -507,7 +507,19 @@ export type PiHoleTraffic = {
   collected_at: string | null;
   status: string;
   queries: { total?: number; blocked?: number; percent_blocked?: number };
-  top_clients: { client: string; count: number }[];
+  top_clients: {
+    client: string;
+    count: number;
+    address?: string | null;
+    device_id?: string | null;
+    device_name?: string | null;
+    profile?: {
+      queries?: number;
+      blocked?: number;
+      nxdomain?: number;
+      top_domains?: { domain: string; count: number }[];
+    };
+  }[];
   top_domains: { domain: string; count: number }[];
   top_blocked_domains: { domain: string; count: number }[];
   anomalies: {

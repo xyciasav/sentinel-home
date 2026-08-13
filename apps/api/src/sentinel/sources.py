@@ -354,6 +354,7 @@ async def fetch_pihole_v6(base_url: str, password: str) -> tuple[list[dict], dic
         if query_traffic:
             traffic["sample"] = query_traffic["sample"]
             traffic["signals"] = query_traffic["signals"]
+            traffic["client_profiles"] = query_traffic["client_profiles"]
     traffic["api_mode"] = "v6"
     traffic["endpoint_status"] = {
         "domains": optional_response_status(domains_response),
@@ -466,6 +467,7 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
     blocked: dict[str, int] = {}
     statuses: dict[str, int] = {}
     query_types: dict[str, int] = {}
+    client_profiles: dict[str, dict] = {}
     blocked_statuses = {
         "GRAVITY",
         "REGEX",
@@ -494,6 +496,28 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
         )
         if identity:
             clients[identity] = clients.get(identity, 0) + 1
+            profile = client_profiles.setdefault(
+                identity,
+                {
+                    "client": identity,
+                    "address": client.get("ip") if isinstance(client, dict) else None,
+                    "queries": 0,
+                    "blocked": 0,
+                    "nxdomain": 0,
+                    "domains": {},
+                },
+            )
+            profile["queries"] += 1
+            profile["blocked"] += status_name in blocked_statuses
+            reply = query.get("reply") or {}
+            reply_type = (
+                str(reply.get("type") or "").upper()
+                if isinstance(reply, dict)
+                else str(reply).upper()
+            )
+            profile["nxdomain"] += reply_type == "NXDOMAIN"
+            if domain:
+                profile["domains"][domain] = profile["domains"].get(domain, 0) + 1
         if domain:
             target = blocked if status_name in blocked_statuses else permitted
             target[domain] = target.get(domain, 0) + 1
@@ -539,7 +563,36 @@ def aggregate_pihole_queries(queries: list[dict]) -> dict:
             top_client_name,
             top_client_count,
         ),
+        "client_profiles": [
+            {
+                **{key: value for key, value in profile.items() if key != "domains"},
+                "top_domains": ranked(profile["domains"], "domain")[:10],
+            }
+            for profile in sorted(
+                client_profiles.values(), key=lambda item: item["queries"], reverse=True
+            )[:25]
+        ],
     }
+
+
+def correlate_traffic_clients(
+    traffic: dict, devices: list[Device], addresses: list[DeviceAddress]
+) -> None:
+    by_address = {item.address: item.device_id for item in addresses}
+    device_by_id = {item.id: item for item in devices}
+    by_hostname = {item.hostname.lower(): item for item in devices if item.hostname}
+    profiles = {item.get("client"): item for item in traffic.get("client_profiles", [])}
+    for client in traffic.get("top_clients", []):
+        identity = str(client.get("client") or "")
+        profile = profiles.get(identity) or {}
+        address = profile.get("address")
+        device = device_by_id.get(by_address.get(address)) if address else None
+        if device is None:
+            device = by_hostname.get(identity.lower())
+        client["address"] = address
+        client["device_id"] = str(device.id) if device else None
+        client["device_name"] = device.display_name if device else None
+        client["profile"] = profile
 
 
 def traffic_signals(
@@ -1027,9 +1080,12 @@ async def pihole_traffic(
         )
     )
     result = []
+    devices = list(await database.scalars(select(Device)))
+    addresses = list(await database.scalars(select(DeviceAddress)))
     for source in sources:
         summary = json.loads(source.summary_json) if source.summary_json else {}
         traffic = summary.get("traffic") or {}
+        correlate_traffic_clients(traffic, devices, addresses)
         collected = traffic.get("collected_at")
         result.append(
             PiHoleTrafficView(

@@ -2115,6 +2115,43 @@ header > div > p:last-child {
 .dns-signals article small {
   display: block;
 }
+.client-traffic-list > button {
+  display: block;
+  width: 100%;
+  padding: 7px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.client-traffic-list > button:hover {
+  background: #f3f7f5;
+}
+.client-traffic-list > button span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.client-traffic-list > button i {
+  display: block;
+  height: 5px;
+  margin-top: 4px;
+  background: #e8eeeb;
+  border-radius: 4px;
+}
+.client-traffic-list > button em {
+  display: block;
+  height: 100%;
+  background: #17845f;
+  border-radius: 4px;
+}
+.dns-client-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: 85vh;
+  overflow: auto;
+}
+.dns-client-stats {
+  grid-template-columns: repeat(3, 1fr);
+}
 .traffic-empty p,
 .traffic-empty small,
 .traffic-empty code {

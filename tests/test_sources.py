@@ -1,8 +1,12 @@
+import uuid
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from sentinel.sources import (
     aggregate_pihole_queries,
     analyze_pihole_traffic,
+    correlate_traffic_clients,
     parse_pihole_devices,
     parse_pihole_traffic,
     pihole_api_base,
@@ -164,3 +168,18 @@ def test_pihole_diagnostics_prioritizes_sync_failure() -> None:
 def test_pihole_signals_identify_chatty_client_and_nxdomain_rate() -> None:
     signals = traffic_signals(200, 10, 40, 0, "camera.lan", 150)
     assert {item["kind"] for item in signals} == {"nxdomain_rate", "chatty_client"}
+
+
+def test_pihole_clients_correlate_to_canonical_device() -> None:
+    device_id = uuid.uuid4()
+    traffic = {
+        "top_clients": [{"client": "camera.lan", "count": 50}],
+        "client_profiles": [{"client": "camera.lan", "address": "10.0.0.44", "queries": 50}],
+    }
+    correlate_traffic_clients(
+        traffic,
+        [SimpleNamespace(id=device_id, display_name="Driveway Camera", hostname="camera.lan")],
+        [SimpleNamespace(address="10.0.0.44", device_id=device_id)],
+    )
+    assert traffic["top_clients"][0]["device_name"] == "Driveway Camera"
+    assert traffic["top_clients"][0]["device_id"] == str(device_id)
